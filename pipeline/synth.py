@@ -309,7 +309,9 @@ def scenario(seed: int, number: int, batch: str) -> dict:
     layouts = spec.layouts
     if rng.random() < spec.negative_share:
         negative = spec.negatives
-        patterns = [negative[k] for k in rng.sample(sorted(negative), rng.randint(1, 3))]
+        patterns = [
+            negative[k] for k in rng.sample(sorted(negative), min(rng.randint(1, 3), len(negative)))
+        ]
         names = ["negative"]
     elif spec.controls:
         layouts = LAYOUTS
