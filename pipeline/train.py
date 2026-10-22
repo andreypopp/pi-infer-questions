@@ -14,7 +14,7 @@ import torch
 from transformers import get_linear_schedule_with_warmup
 
 from corpus import load_units
-from evaluate import evaluate
+from evaluate import evaluate, held_of
 from label import LABELS, gold_of, load_labelled, load_prompt
 from model import (
     CHECKPOINT,
@@ -37,22 +37,24 @@ BATCH = 16
 WARMUP = 0.1
 MAX_FPR = 0.05
 
-Example = tuple[str, list[Typed]]
 
-
-def fit(tokenizer, task: str, data: list[Example], seed: int, epochs: int):
-    """Train a tagger on (text, spans) examples. A text over MAX_TOKENS tokens is cut there, and
-    the spans that end after the cut are left out. The batches hold texts of similar length;
-    their order changes with each epoch."""
-    random.seed(seed)
-    torch.manual_seed(seed)
-    hardware = device()
+def prepare(tokenizer, data: list[tuple[str, list[Typed]]]) -> list[tuple[list[int], list[int]]]:
+    """(token ids, tags) of (text, spans) examples, shortest first. A text over MAX_TOKENS tokens
+    is cut there, and the spans that end after the cut are left out."""
     encoded = []
     for text, spans in data:
         ids, offsets = encode(tokenizer, text)
         seen = max(end for _, end in offsets)
         encoded.append((ids, tags_for(offsets, [s for s in spans if s[1] <= seen])))
-    encoded.sort(key=lambda item: len(item[0]))
+    return sorted(encoded, key=lambda item: len(item[0]))
+
+
+def fit(tokenizer, task: str, encoded: list, seed: int, epochs: int):
+    """Train a tagger on prepared examples. The batches hold texts of similar length; their order
+    changes with each epoch."""
+    random.seed(seed)
+    torch.manual_seed(seed)
+    hardware = device()
     batches = [encoded[first : first + BATCH] for first in range(0, len(encoded), BATCH)]
     model = new_model(task).to(hardware).train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
@@ -73,29 +75,22 @@ def fit(tokenizer, task: str, data: list[Example], seed: int, epochs: int):
     return model.eval()
 
 
-def train(tokenizer, records: list[dict], seed: int, epochs: int) -> dict:
+def examples(tokenizer, records: list[dict]) -> dict[str, list]:
     """The question tagger reads each unit and tags the questions with their kinds; the option
     tagger reads each choice."""
     gold = [(r["lined"], gold_of(r)) for r in records]
     return {
-        "question": fit(
-            tokenizer,
-            "question",
-            [(t, [(a, b, KINDS.index(kind)) for (a, b), kind, _ in g]) for t, g in gold],
-            seed,
-            epochs,
+        "question": prepare(
+            tokenizer, [(t, [(a, b, KINDS.index(kind)) for (a, b), kind, _ in g]) for t, g in gold]
         ),
-        "option": fit(
+        "option": prepare(
             tokenizer,
-            "option",
             [
                 (t[a:b], [(x, y, 0) for x, y in options])
                 for t, g in gold
                 for (a, b), kind, options in g
                 if kind == "choice"
             ],
-            seed,
-            epochs,
         ),
     }
 
@@ -118,10 +113,12 @@ def run(
     """Train each seed under out/seed<N>, score it on dev, and copy the selected one to
     out/selected. Returns the selected seed and the dev scores."""
     scores = {}
+    encoded = examples(tokenizer, train_records)
+    held = held_of(tokenizer, dev_records)
     for seed in seeds:
-        taggers = train(tokenizer, train_records, seed, epochs)
+        taggers = {task: fit(tokenizer, task, data, seed, epochs) for task, data in encoded.items()}
         save(taggers, tokenizer, out / f"seed{seed}")
-        scores[seed] = evaluate(tokenizer, torch_taggers(tokenizer, taggers), dev_records)
+        scores[seed] = evaluate(tokenizer, torch_taggers(tokenizer, taggers), dev_records, held)
     chosen = select(scores)
     shutil.rmtree(out / "selected", ignore_errors=True)
     if chosen is not None:
@@ -149,7 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"train: {len(train_records)} training units", file=sys.stderr)
     if args.eval:
         scores = evaluate(
-            tokenizer, torch_taggers(tokenizer, load(args.root / "selected")), labelled["eval"]
+            tokenizer,
+            torch_taggers(tokenizer, load(args.root / "selected")),
+            labelled["eval"],
+            held_of(tokenizer, labelled["eval"]),
         )
     else:
         chosen, scores = run(

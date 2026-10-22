@@ -1,17 +1,10 @@
 """Scores of the taggers on labelled units: question and option F1, kinds, exact match, false
 positives."""
 
+from extract import ask, attach_options
 from label import gold_of, lined_context
-from tagging import (
-    KINDS,
-    MAX_TOKENS,
-    OPTION_TRAILING,
-    Span,
-    after_context,
-    project,
-    token_count,
-)
-from units import ITEM
+from tagging import KINDS, MAX_TOKENS, OPTION_TRAILING, Span, project, token_count
+from units import ITEM, line_starts
 
 Unit = list[
     tuple[Span, str, tuple[Span, ...]]
@@ -40,6 +33,10 @@ def project_gold(
     return out
 
 
+def held_of(tokenizer, records: list[dict]) -> list:
+    return [project_gold(tokenizer, r["lined"], gold_of(r)) for r in records]
+
+
 def changed(gold: Unit, held: list) -> int:
     """How many gold questions and options the tokens change or lose."""
     count = 0
@@ -55,24 +52,7 @@ def changed(gold: Unit, held: list) -> int:
 
 def decode(taggers: dict, texts: list[str], contexts: list[int]) -> list[Unit]:
     """The questions of each text with their kinds. The option tagger reads the choices only."""
-    spans = [
-        after_context(found, context)
-        for found, context in zip(taggers["question"](texts), contexts, strict=True)
-    ]
-    asked = [
-        t[a:b]
-        for t, found in zip(texts, spans, strict=True)
-        for a, b, k in found
-        if KINDS[k] == "choice"
-    ]
-    options = iter(taggers["option"](asked, OPTION_TRAILING))
-    return [
-        [
-            ((a, b), KINDS[k], tuple(next(options)) if KINDS[k] == "choice" else ())
-            for a, b, k in found
-        ]
-        for found in spans
-    ]
+    return attach_options(taggers, texts, ask(taggers, texts, contexts))
 
 
 def f1(found: set, wanted: set) -> float:
@@ -177,9 +157,7 @@ def part(gold: list[Unit], pred: list[Unit], inner: list[Unit]) -> dict[str, flo
 def markers(text: str) -> list[int]:
     """The offsets of the lines that start with a list marker."""
     return [
-        sum(map(len, text.split("\n")[:n])) + n
-        for n, line in enumerate(text.split("\n"))
-        if ITEM.match(line)
+        s for s, line in zip(line_starts(text), text.split("\n"), strict=True) if ITEM.match(line)
     ]
 
 
@@ -190,27 +168,16 @@ def is_option_list(text: str, gold: Unit) -> bool:
     )
 
 
-def evaluate(tokenizer, taggers: dict, records: list[dict]) -> dict[str, dict]:
+def evaluate(tokenizer, taggers: dict, records: list[dict], held: list) -> dict[str, dict]:
     """Scores of all units, of the units with 2 or more questions, of those with a choice and of
-    the three kinds of list unit, against the gold as the tokens hold it. The "all" part also has
-    the false positive rates, the number of gold spans that the tokens change and the units over
-    the token limit."""
+    the three kinds of list unit, against the gold as the tokens hold it (`held_of`). The "all"
+    part also has the false positive rates, the number of gold spans that the tokens change and
+    the units over the token limit."""
     texts = [r["lined"] for r in records]
     originals = [gold_of(r) for r in records]
-    held = [project_gold(tokenizer, t, g) for t, g in zip(texts, originals, strict=True)]
     gold = [[(q, kind, options) for _, q, kind, options in filter(None, unit)] for unit in held]
     pred = decode(taggers, texts, [lined_context(r) for r in records])
-    choices = [
-        t[a:b]
-        for t, unit in zip(texts, gold, strict=True)
-        for (a, b), kind, _ in unit
-        if kind == "choice"
-    ]
-    options = iter(taggers["option"](choices, OPTION_TRAILING))
-    inner = [
-        [(q, kind, tuple(next(options)) if kind == "choice" else ()) for q, kind, _ in unit]
-        for unit in gold
-    ]
+    inner = attach_options(taggers, texts, gold)
     parts = {
         "all": lambda t, g: True,
         "multi": lambda t, g: len(g) >= 2,

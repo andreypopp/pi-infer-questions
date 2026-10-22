@@ -11,30 +11,48 @@ from tagging import KINDS, MAX_TOKENS, OPTION_TRAILING, after_context, message_r
 from units import category, units
 
 
-def with_trace(taggers: dict) -> dict:
-    """Taggers that return their spans and a trace, the form of `analyse`: torch has none."""
-    return {
-        task: lambda texts, trailing="", f=f: (f(texts, trailing), None)
-        for task, f in taggers.items()
-    }
+def ask(taggers: dict, texts: list[str], contexts: list[int]) -> list[list[tuple]]:
+    """(span, kind) of each question of each text, after the first `context` characters."""
+    return [
+        [((a, b), KINDS[k]) for a, b, k in after_context(found, context)]
+        for found, context in zip(taggers["question"](texts), contexts, strict=True)
+    ]
 
 
-def analyse(taggers: dict, markdown: str) -> dict:
+def option_texts(texts: list[str], asked: list[list[tuple]]) -> list[str]:
+    """The choice questions of the texts: the only texts that the option tagger reads."""
+    return [
+        t[a:b]
+        for t, unit in zip(texts, asked, strict=True)
+        for (a, b), kind, *_ in unit
+        if kind == "choice"
+    ]
+
+
+def attach_options(taggers: dict, texts: list[str], asked: list[list[tuple]]) -> list[list[tuple]]:
+    """(span, kind, option spans in the span) of each question in `asked`."""
+    options = iter(taggers["option"](option_texts(texts, asked), OPTION_TRAILING))
+    return [
+        [(span, kind, tuple(next(options)) if kind == "choice" else ()) for span, kind, *_ in unit]
+        for unit in asked
+    ]
+
+
+def analyse(taggers: dict, markdown: str, trace=None) -> dict:
     """The questions of a Markdown message, with the intermediate data of every step: the units
     (gated or not), the question spans of the gated ones, the options of the choice questions,
-    and the ranges in the message. The models read the units with their line breaks."""
+    and the ranges in the message. The models read the units with their line breaks. `trace`
+    gives the tokens of the texts that a model reads."""
     found = units(*normalise(markdown))
     gated = [i for i, u in enumerate(found) if category(u.text) != "other"]
-    spans, question_trace = taggers["question"]([found[i].text for i in gated])
-    spans = [after_context(pairs, found[i].context) for i, pairs in zip(gated, spans, strict=True)]
-    asked = [(gated[n], a, b, KINDS[k]) for n, pairs in enumerate(spans) for a, b, k in pairs]
-    choices = [n for n, (_, _, _, kind) in enumerate(asked) if kind == "choice"]
-    texts = [found[i].text[a:b] for i, a, b, _ in (asked[n] for n in choices)]
-    options, option_trace = taggers["option"](texts, OPTION_TRAILING)
-    inner_of = dict(zip(choices, options, strict=True))
+    texts = [found[i].text for i in gated]
+    asked = ask(taggers, texts, [found[i].context for i in gated])
+    options = attach_options(taggers, texts, asked)
+    flat = [(i, *question) for i, unit in zip(gated, options, strict=True) for question in unit]
+    choices = [n for n, (_, _, kind, _) in enumerate(flat) if kind == "choice"]
     questions = []
-    for n, (i, a, b, kind) in enumerate(asked):
-        origin, inner = found[i].origin, inner_of.get(n, [])
+    for i, (a, b), kind, inner in flat:
+        origin = found[i].origin
         span = message_range(origin, markdown, a, b)
         ranges = [message_range(origin, markdown, a + x, a + y) for x, y in inner]
         questions.append(
@@ -53,16 +71,16 @@ def analyse(taggers: dict, markdown: str) -> dict:
             {"text": u.text, "origin": u.origin, "context": u.context, "gated": n in gated}
             for n, u in enumerate(found)
         ],
-        "question_tokens": question_trace and {"units": gated, **question_trace},
+        "question_tokens": trace and {"units": gated, **trace(texts)},
         "questions": questions,
-        "option_tokens": option_trace and {"questions": choices, **option_trace},
+        "option_tokens": trace and {"questions": choices, **trace(option_texts(texts, asked))},
     }
 
 
 def extract(tokenizer, taggers: dict, text: str) -> tuple[list[dict], int]:
     """Questions in text order with their kinds, and how many units were cut at the token limit.
     Each question is a substring of text, as are its options."""
-    found = analyse(with_trace(taggers), text)
+    found = analyse(taggers, text)
     cut = sum(token_count(tokenizer, u["text"]) > MAX_TOKENS for u in found["units"] if u["gated"])
     return [
         {

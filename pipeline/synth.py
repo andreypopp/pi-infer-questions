@@ -13,16 +13,17 @@ import json
 import random
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from openai import APIError
 
 from corpus import Row, has_letters, load_units, redacted
-from deepseek import BudgetExceeded, PeakHours, complete, open_session
-from jsonl import DATA, append_jsonl, read_jsonl
-from label import Prompt, current, load_prompt, run
+from deepseek import BudgetExceeded, PeakHours, Session, complete, open_session
+from jsonl import DATA, append_jsonl, read_jsonl, sha256
+from label import Prompt, current, load_labelled, load_prompt, run
 from normalise import normalise
 from units import category, units
 
@@ -30,17 +31,6 @@ SYNTH = DATA / "synth"
 GENERATIONS = SYNTH / "generations.jsonl"
 LABELS = SYNTH / "labels.jsonl"
 PROMPT = Path(__file__).parent / "synth_prompt.md"
-NEGATIVE_SHARES = {
-    "base": 0.2,
-    "negatives": 0.7,
-    "narration": 0.85,
-    "options": 0.15,
-    "lists": 0.4,
-    "lists-check": 0.4,
-}
-BATCHES = (*NEGATIVE_SHARES, "sonnet")  # "sonnet" is stored data: read and labelled, not generated
-TRAIN_BATCHES = tuple(b for b in BATCHES if b != "lists-check")  # lists-check is held out
-LIST_BATCHES = ("lists", "lists-check")
 WORKERS = 24
 
 PROJECTS = (
@@ -288,30 +278,46 @@ LISTS_NEGATIVE = {
     "findings": 'a list of findings, measurements or risks with "I recommend" inside a report '
     "that waits for nothing; no question for the user",
 }
-SCENARIOS = {
-    "narration": (NARRATION, CONTROLS),
-    "options": (OPTION_LISTS_NEGATIVE, None),
-    **dict.fromkeys(LIST_BATCHES, (LISTS_NEGATIVE, None)),
+
+
+@dataclass(frozen=True)
+class Batch:
+    negative_share: float
+    negatives: dict
+    controls: dict | None
+    layouts: dict
+    positive: dict
+    held_out: bool = False
+    generated: bool = True
+
+
+BATCHES = {
+    "base": Batch(0.2, NEGATIVE, None, LAYOUTS, POSITIVE),
+    "negatives": Batch(0.7, NEGATIVE, None, LAYOUTS, POSITIVE),
+    "narration": Batch(0.85, NARRATION, CONTROLS, NARRATION_LAYOUTS, POSITIVE),
+    "options": Batch(0.15, OPTION_LISTS_NEGATIVE, None, OPTION_LAYOUTS, OPTION_LISTS),
+    "lists": Batch(0.4, LISTS_NEGATIVE, None, LIST_LAYOUTS, LIST_PATTERNS),
+    "lists-check": Batch(0.4, LISTS_NEGATIVE, None, LIST_LAYOUTS, LIST_PATTERNS, held_out=True),
+    "sonnet": Batch(0.0, {}, None, LAYOUTS, POSITIVE, generated=False),
 }
+TRAIN_BATCHES = tuple(name for name, batch in BATCHES.items() if not batch.held_out)
 
 
 def scenario(seed: int, number: int, batch: str) -> dict:
     rng = random.Random(f"{seed}:{number}")
-    negative, controls = SCENARIOS.get(batch, (NEGATIVE, None))
-    layouts = NARRATION_LAYOUTS if controls else LAYOUTS
-    positive = POSITIVE
-    if batch == "options":
-        layouts, positive = OPTION_LAYOUTS, OPTION_LISTS
-    if batch in LIST_BATCHES:
-        layouts, positive = LIST_LAYOUTS, LIST_PATTERNS
-    if rng.random() < NEGATIVE_SHARES[batch]:
+    spec = BATCHES[batch]
+    layouts = spec.layouts
+    if rng.random() < spec.negative_share:
+        negative = spec.negatives
         patterns = [negative[k] for k in rng.sample(sorted(negative), rng.randint(1, 3))]
         names = ["negative"]
-    elif controls:
+    elif spec.controls:
         layouts = LAYOUTS
+        controls = spec.controls
         patterns = [controls[k] for k in rng.sample(sorted(controls), rng.randint(1, 2))]
         names = ["control"]
     else:
+        positive = spec.positive
         wanted = rng.randint(1, 3)
         names = []
         while len(names) < wanted:
@@ -327,26 +333,22 @@ def scenario(seed: int, number: int, batch: str) -> dict:
     }
 
 
-def user_message(s: dict) -> str:
-    patterns = "\n".join(f"- {p}" for p in s["patterns"])
-    return (
-        f"Project: {s['project']}\nAgent situation: {s['situation']}\nLayout: {s['layout']}\n"
-        f"Question patterns:\n{patterns}"
-    )
-
-
 def generate(
-    ask: Callable[[str, str, str], tuple[str, str]],
-    template: Prompt,
-    seed: int,
-    number: int,
-    count: int,
-    batch: str,
+    session: Session, template: Prompt, seed: int, number: int, count: int, batch: str
 ) -> dict:
     s = scenario(seed, number, batch)
-    content, finish = ask(
-        template.text.replace("{count}", str(count)), user_message(s), f"synth{seed}-{number}"
-    )
+    patterns = "\n".join(f"- {p}" for p in s["patterns"])
+    chat = [
+        {"role": "system", "content": template.text.replace("{count}", str(count))},
+        {
+            "role": "user",
+            "content": (
+                f"Project: {s['project']}\nAgent situation: {s['situation']}\n"
+                f"Layout: {s['layout']}\nQuestion patterns:\n{patterns}"
+            ),
+        },
+    ]
+    content, finish = complete(session, chat, f"synth{seed}-{number}")
     try:
         found = json.loads(content)["messages"]
     except (ValueError, KeyError, TypeError):
@@ -393,20 +395,31 @@ def make_units(
     return list(kept.values()), counts, origin
 
 
+def batch_units(
+    generations: list[dict], batches: Iterable[str], user: str
+) -> tuple[list[Row], Counter, dict[str, tuple[str, int]]]:
+    """make_units of all generations, with the rows of the batches only."""
+    rows, counts, origin = make_units(generations, user)
+    batch_of = {g["id"]: g["batch"] for g in generations}
+    return [r for r in rows if batch_of[origin[r.text][0]] in batches], counts, origin
+
+
 def labelled_units(batches: list[str]) -> list[dict]:
     """The labelled units of the batches that training reads as the source "synth": gated,
     labelled with the current prompt, deduplicated like make_units."""
-    prompt = load_prompt()
-    generations = read_jsonl(GENERATIONS)
-    batch_of = {g["id"]: g["batch"] for g in generations}
-    rows, _, origin = make_units(generations, getpass.getuser())
-    chosen = {r.text: r for r in rows if batch_of[origin[r.text][0]] in batches}
-    latest = {
-        r["text"]: r
-        for r in read_jsonl(LABELS)
-        if r["status"] == "labelled" and current(r, prompt) and r["text"] in chosen
+    rows, _, _ = batch_units(read_jsonl(GENERATIONS), batches, getpass.getuser())
+    return load_labelled(LABELS, rows, load_prompt())[0]["train"]
+
+
+def messages() -> list[str]:
+    """The generated messages, in the order of their hashes. They hold no real text."""
+    seen = {
+        message
+        for generation in read_jsonl(GENERATIONS)
+        if generation["status"] == "ok"
+        for message in generation["messages"]
     }
-    return [r | {"lined": chosen[t].lined, "context": chosen[t].context} for t, r in latest.items()]
+    return sorted((t for t in seen if 20 <= len(t) <= 6000), key=sha256)
 
 
 def report(examples: int, batch: str) -> None:
@@ -462,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.report is not None:
         report(args.report, args.batch)
         return 0
-    if args.calls and args.batch == "sonnet":
+    if args.calls and not BATCHES[args.batch].generated:
         print("synth: the batch sonnet is stored data; it has no generator", file=sys.stderr)
         return 1
     with open_session("synth", args.peak) as session:
@@ -470,10 +483,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         ledger = session.ledger
         start = ledger.total
-
-        def ask(system: str, user: str, nonce: str) -> tuple[str, str]:
-            messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-            return complete(session, messages, nonce)
 
         template, prompt = load_prompt(PROMPT), load_prompt()
         done = {g["id"] for g in read_jsonl(GENERATIONS)}
@@ -486,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 append_jsonl(
                     GENERATIONS,
-                    generate(ask, template, args.seed, number, args.count, args.batch),
+                    generate(session, template, args.seed, number, args.count, args.batch),
                 )
             except (BudgetExceeded, PeakHours) as error:
                 stop.append(type(error).__name__)
@@ -497,9 +506,7 @@ def main(argv: list[str] | None = None) -> int:
             list(pool.map(write, wanted))
         generation_cost = ledger.total - start
         generations = read_jsonl(GENERATIONS)
-        batch_of = {g["id"]: g["batch"] for g in generations}
-        rows, counts, origin = make_units(generations, getpass.getuser())
-        batch_rows = [r for r in rows if batch_of[origin[r.text][0]] == args.batch]
+        batch_rows, counts, _ = batch_units(generations, [args.batch], session.user)
         labels = run(session, prompt, batch_rows, LABELS, WORKERS)
         print(
             f"synth: {len(wanted)} calls requested, stops {sorted(set(stop))}, generation "

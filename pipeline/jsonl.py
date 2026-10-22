@@ -10,12 +10,16 @@ from pathlib import Path
 DATA = Path(__file__).parent.parent / "data"
 
 
+def short_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 def sha256(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+    return short_digest(text.encode())
 
 
 def file_digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    return short_digest(path.read_bytes())
 
 
 def write_text(path: Path, text: str) -> None:

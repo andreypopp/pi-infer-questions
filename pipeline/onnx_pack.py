@@ -9,10 +9,8 @@ function of the token counts (`batches`); the native build reads the same limits
 The output directory is self-contained, like the one of `convert-ane`.
 """
 
-import argparse
 import platform
 import statistics
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -23,29 +21,19 @@ import onnxruntime as ort
 import torch
 from onnxruntime.quantization import QuantType, quantize_dynamic
 from torch import nn
-from transformers import AutoTokenizer
 
-from ane import source_digest
-from ane_pack import (
+from jsonl import DATA, file_digest, write_json
+from model import TASKS, load, load_tokenizer
+from pack import (
     Runtime,
+    common_settings,
+    convert_main,
+    open_runtime,
     paths,
-    require_checkpoint,
     run_golden,
     run_parity,
-    spans_only,
+    tag,
 )
-from jsonl import DATA, file_digest, read_json, write_json
-from model import CHECKPOINT, TASKS, load, load_tokenizer, require_tags, untyped
-from tagging import (
-    CLOSING,
-    MAX_TOKENS,
-    OPENING,
-    OPTION_TRAILING,
-    TAG_NAMES,
-    encode,
-    spans_of,
-)
-from units import DECISION
 
 ONNX = DATA / "onnx"
 ARCH = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x64"}[platform.machine()]
@@ -93,25 +81,19 @@ def build(model: Path, output: Path, quantize: bool) -> None:
             quantize_dynamic(full, output / f"{task}.onnx", weight_type=QuantType.QInt8)
     tokenizer = load_tokenizer(model)
     tokenizer.save_pretrained(output)
+    common = common_settings(model, tokenizer)
     write_json(
         output / "settings.json",
         {
-            "pad_token_id": tokenizer.pad_token_id,
-            "tags": TAG_NAMES,
-            "max_tokens": MAX_TOKENS,
+            **common,
             "batch": {"rows": BATCH_ROWS, "tokens": BATCH_TOKENS},
-            "trim": {"closing": CLOSING, "opening": OPENING, "option_trailing": OPTION_TRAILING},
-            "decision": {"pattern": DECISION.pattern, "flags": "i"},
             "weights": "int8 dynamic" if quantize else "float32",
             "opset": OPSET,
             "onnx": onnx.__version__,
             "onnxruntime": ort.__version__,
             "torch": torch.__version__,
             "digests": {
-                "source": source_digest(),
-                "checkpoint": {
-                    task: file_digest(model / task / "model.safetensors") for task in TASKS
-                },
+                **common["digests"],
                 "models": {task: file_digest(output / f"{task}.onnx") for task in TASKS},
                 "tokenizer": file_digest(output / "tokenizer.json"),
             },
@@ -135,50 +117,31 @@ def batches(lengths: list[int]) -> list[list[int]]:
     return found
 
 
+def predict(model, pad: int, ids: list[list[int]]) -> list[list[int]]:
+    """The tags of the units, which are the rows of one batch."""
+    width = max(map(len, ids))
+    tokens = np.full((len(ids), width), pad, dtype=np.int64)
+    mask = np.zeros((len(ids), width), dtype=np.int64)
+    for r, unit in enumerate(ids):
+        tokens[r, : len(unit)], mask[r, : len(unit)] = unit, 1
+    tags = model.run(["logits"], dict(zip(INPUTS, (tokens, mask), strict=True)))[0].argmax(-1)
+    return [tags[r, : len(unit)].tolist() for r, unit in enumerate(ids)]
+
+
 def load_runtime(directory: Path, checkpoint: Path, threads: int = 0) -> Runtime:
-    """The tokenizer and the sessions of the directory, on the CPU."""
+    """The sessions of the directory, on the CPU."""
     options = ort.SessionOptions()
     options.intra_op_num_threads = threads
-    models = {
-        task: ort.InferenceSession(
-            str(directory / f"{task}.onnx"), options, providers=["CPUExecutionProvider"]
-        )
-        for task in TASKS
-    }
-    settings = read_json(directory / "settings.json")
-    require_checkpoint(settings, directory, checkpoint)
-    require_tags(settings["tags"], directory)
-    return Runtime(AutoTokenizer.from_pretrained(directory), settings, models)
 
-
-def tag(runtime: Runtime, task: str, texts: list[str], trailing: str = ""):
-    """The spans of each text (typed for the question task), and the tokens and batches that made
-    them."""
-    encoded = [encode(runtime.tokenizer, t) for t in texts]
-    rows = batches([len(ids) for ids, _ in encoded])
-    spans: list = [None] * len(texts)
-    for row in rows:
-        width = max(len(encoded[i][0]) for i in row)
-        ids = np.full((len(row), width), runtime.settings["pad_token_id"], dtype=np.int64)
-        mask = np.zeros((len(row), width), dtype=np.int64)
-        for r, i in enumerate(row):
-            n = len(encoded[i][0])
-            ids[r, :n], mask[r, :n] = encoded[i][0], 1
-        logits = runtime.models[task].run(["logits"], dict(zip(INPUTS, (ids, mask), strict=True)))[
-            0
-        ]
-        tags = logits.argmax(-1)
-        for r, i in enumerate(row):
-            found = spans_of(
-                texts[i], encoded[i][1], tags[r, : len(encoded[i][0])].tolist(), trailing
+    def models(settings: dict) -> dict:
+        return {
+            task: ort.InferenceSession(
+                str(directory / f"{task}.onnx"), options, providers=["CPUExecutionProvider"]
             )
-            spans[i] = found if task == "question" else untyped(found)
-    tokens = [{"ids": ids, "offsets": [list(o) for o in offsets]} for ids, offsets in encoded]
-    return spans, {"tokens": tokens, "packs": rows}
+            for task in TASKS
+        }
 
-
-def onnx_taggers(runtime: Runtime) -> dict:
-    return {task: lambda t, tr="", task=task: tag(runtime, task, t, tr) for task in TASKS}
+    return open_runtime(directory, checkpoint, models, batches, predict)
 
 
 def latency(directory: Path, checkpoint: Path, texts: list[str], threads: int) -> dict:
@@ -199,25 +162,13 @@ def latency(directory: Path, checkpoint: Path, texts: list[str], threads: int) -
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, default=CHECKPOINT)
-    parser.add_argument("--output", type=Path, default=ONNX)
-    args = parser.parse_args(argv)
-    if args.output.exists():
-        print(f"convert-onnx: {args.output} exists", file=sys.stderr)
-        return 1
-    build(args.model, args.output, quantize=True)
-    return 0
+    return convert_main("convert-onnx", __doc__, ONNX, build, argv)
 
 
 def parity(argv: list[str] | None = None) -> int:
-    """The ONNX taggers against torch on the dev units (`ane_pack.run_parity`); the conversion gate
+    """The ONNX taggers against torch on the dev units (`pack.run_parity`); the conversion gate
     is the export. The latency is of the CPU of this machine, whatever it is."""
     args = paths(parity.__doc__, argv, ONNX)
-
-    def exact(scratch: Path) -> dict:
-        build(args.model, scratch / "fp32", quantize=False)
-        return spans_only(onnx_taggers(load_runtime(scratch / "fp32", args.model)))
 
     def timed(texts: list[str]) -> dict:
         return {
@@ -228,13 +179,11 @@ def parity(argv: list[str] | None = None) -> int:
             }
         }
 
-    shipped = spans_only(onnx_taggers(load_runtime(args.pack, args.model)))
-    return run_parity(args.model, exact, shipped, "export", PARITY_ONNX, timed)
+    return run_parity(args, build, load_runtime, "export", PARITY_ONNX, timed)
 
 
 def golden(argv: list[str] | None = None) -> int:
     """The fixture of the Linux build, `data/golden-onnx-<arch>.json` for the architecture of this
-    machine (the int8 results depend on it), made by the int8 ONNX models (`run_golden`)."""
+    machine (the int8 results depend on it), made by the int8 ONNX models (`pack.run_golden`)."""
     args = paths(golden.__doc__, argv, ONNX)
-    runtime = load_runtime(args.pack, args.model)
-    return run_golden(args.model, onnx_taggers(runtime), runtime.settings, GOLDEN_ONNX)
+    return run_golden(args.model, load_runtime(args.pack, args.model), GOLDEN_ONNX)

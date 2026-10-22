@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from functools import partial
 
 _NAME = (
     r"(?i:(?:[a-z0-9.-]+[_-])?"
@@ -45,8 +47,31 @@ _WRAPPED = re.compile(
 )
 
 
-def _mask(match: re.Match[str], prefix: str, fill: str) -> str:
-    return prefix + fill * (len(match.group(0)) - len(prefix))
+def _mask(match: re.Match[str], *, prefix: str | Callable[[str], str], fill: str) -> str:
+    found = match.group(0)
+    kept = prefix(found) if callable(prefix) else prefix
+    return kept + fill * (len(found) - len(kept))
+
+
+def _mask_wrapped(match: re.Match[str]) -> str:
+    left = match.group("left")
+    right = match.group("right")
+    fill = "0" if all(character in "0123456789abcdefABCDEF" for character in left + right) else "z"
+    return fill * len(left) + match.group("newline") + fill * len(right)
+
+
+_MASKED = (
+    (_BEARER, "Bearer ", "x"),
+    (_SK, "sk-", "x"),
+    (_GITHUB, lambda found: found[: found.index("_") + 1], "x"),
+    (_SLACK, lambda found: found[: found.index("-") + 1], "x"),
+    (_AWS, "AKIA", "X"),
+    (_GITLAB, "glpat-", "x"),
+    (_NPM, "npm_", "x"),
+    (_PYPI, "pypi-", "x"),
+    (_GOOGLE, "AIza", "x"),
+    (_STRIPE, lambda found: found[: found.rindex("_") + 1], "x"),
+)
 
 
 def _mask_block(text: str) -> str:
@@ -67,23 +92,8 @@ def redact(text: str, *, user: str) -> str:
     text = _JWT.sub(lambda match: "A" * len(match.group(0)), text)
     text = _LONG.sub(lambda match: ("0" if match.group("hex") else "z") * len(match.group(0)), text)
     text = _WRAPPED.sub(_mask_wrapped, text)
-    text = _BEARER.sub(lambda match: _mask(match, "Bearer ", "x"), text)
-    text = _SK.sub(lambda match: _mask(match, "sk-", "x"), text)
-    text = _GITHUB.sub(
-        lambda match: _mask(match, match.group(0)[: match.group(0).index("_") + 1], "x"), text
-    )
-    text = _SLACK.sub(
-        lambda match: _mask(match, match.group(0)[: match.group(0).index("-") + 1], "x"), text
-    )
-    text = _AWS.sub(lambda match: _mask(match, "AKIA", "X"), text)
-    text = _GITLAB.sub(lambda match: _mask(match, "glpat-", "x"), text)
-    text = _NPM.sub(lambda match: _mask(match, "npm_", "x"), text)
-    text = _PYPI.sub(lambda match: _mask(match, "pypi-", "x"), text)
-    text = _GOOGLE.sub(lambda match: _mask(match, "AIza", "x"), text)
-    text = _STRIPE.sub(
-        lambda match: _mask(match, match.group(0)[: match.group(0).rindex("_") + 1], "x"),
-        text,
-    )
+    for pattern, prefix, fill in _MASKED:
+        text = pattern.sub(partial(_mask, prefix=prefix, fill=fill), text)
 
     for quoted in (_QUOTED, _ESCAPED):
         text = quoted.sub(
@@ -97,11 +107,9 @@ def redact(text: str, *, user: str) -> str:
             text,
         )
 
-    def assignment(match: re.Match[str]) -> str:
-        key, separator, quote, value = match.groups()
-        return key + separator + quote + "x" * len(value)
-
-    text = _ASSIGNMENT.sub(assignment, text)
+    text = _ASSIGNMENT.sub(
+        lambda match: "".join(match.groups()[:3]) + "x" * len(match.group(4)), text
+    )
     if user:
         text = re.sub(
             rf"(?i)(?<![A-Za-z0-9_]){re.escape(user)}(?![A-Za-z0-9_])",
@@ -109,10 +117,3 @@ def redact(text: str, *, user: str) -> str:
             text,
         )
     return text
-
-
-def _mask_wrapped(match: re.Match[str]) -> str:
-    left = match.group("left")
-    right = match.group("right")
-    fill = "0" if all(character in "0123456789abcdefABCDEF" for character in left + right) else "z"
-    return fill * len(left) + match.group("newline") + fill * len(right)

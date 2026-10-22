@@ -12,6 +12,7 @@ ATX_CLOSE = re.compile(r"\s+#+\s*$")
 SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)\s*$")
 NOT_KEPT = {"fence", "code_block", "html_block", "table_open", "blockquote_open", "hr"}
 LISTS = {"bullet_list_open", "ordered_list_open"}
+LISTS_CLOSE = {t.replace("_open", "_close") for t in LISTS}
 FRONT_MATTER_END = re.compile(r"---\s*|\.\.\.\s*")
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -139,9 +140,9 @@ def prose_lines(lines: list[str]) -> tuple[set[int], set[int]]:
             quoted += 1
         elif token.type == "blockquote_close":
             quoted -= 1
-        elif token.type in ("bullet_list_open", "ordered_list_open"):
+        elif token.type in LISTS:
             listed += 1
-        elif token.type in ("bullet_list_close", "ordered_list_close"):
+        elif token.type in LISTS_CLOSE:
             listed -= 1
         elif token.type == "heading_open" and token.level == 0:
             first, end = token.map
@@ -186,11 +187,11 @@ def normalise(text: str) -> tuple[Mapped, set[int]]:
         if number not in kept:
             mask[start:end] = [False] * (end - start)
             continue
-        for index in inline_drops(lines[number]):
-            mask[start + index] = False
+        drops = inline_drops(lines[number])
         if number in headings:
             for marker in (ATX_OPEN.match(lines[number]), ATX_CLOSE.search(lines[number])):
                 if marker:
-                    drops = range(start + marker.start(), start + marker.end())
-                    mask[drops.start : drops.stop] = [False] * len(drops)
+                    drops += range(marker.start(), marker.end())
+        for index in drops:
+            mask[start + index] = False
     return mapped.keep(mask), headings

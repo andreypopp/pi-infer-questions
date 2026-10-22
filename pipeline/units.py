@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from itertools import accumulate
 
 from normalise import Mapped, lines_of
 
@@ -39,6 +40,10 @@ def paragraphs(mapped: Mapped) -> list[list[int]]:
     return [run for run in runs if run]
 
 
+def line_starts(text: str) -> list[int]:
+    return list(accumulate((len(line) + 1 for line in text.split("\n")), initial=0))[:-1]
+
+
 def marker_kind(line: str) -> str:
     first = line.lstrip()[0]
     return "number" if first.isdigit() else "letter" if first.isalpha() else "bullet"
@@ -50,7 +55,7 @@ def segments(unit: Mapped) -> list[Mapped]:
     text has no indentation, so the top-level items are those with the marker kind of the first
     item."""
     lines = unit.text.split("\n")
-    starts = [sum(len(line) + 1 for line in lines[:n]) for n in range(len(lines))]
+    starts = line_starts(unit.text)
     items = [n for n, line in enumerate(lines) if ITEM.match(line)]
     if not items:
         return [unit]
@@ -59,9 +64,8 @@ def segments(unit: Mapped) -> list[Mapped]:
     asks = ["?" in "\n".join(lines[t:e]) for t, e in zip(top, ends, strict=True)]
     if not any(asks):
         return [unit]
-    cuts = [0] if top[0] > 0 else []
-    cuts += [t for t, ask, before in zip(top, asks, [False, *asks], strict=False) if ask or before]
-    cuts = sorted(set(cuts) | {top[0]})
+    marked = (t for t, ask, before in zip(top, asks, [False, *asks], strict=False) if ask or before)
+    cuts = sorted({0, top[0], *marked})
     bounds = [*cuts, len(lines)]
     out = []
     for first, last in zip(bounds, bounds[1:], strict=False):

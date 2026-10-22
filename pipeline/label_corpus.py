@@ -12,7 +12,7 @@ from corpus import (
     uniform_order,
 )
 from deepseek import open_session
-from label import LABELS, load_prompt, run
+from label import LABELS, WORKERS, load_prompt, run
 from units import category
 
 CATEGORIES = ("question", "pool", "other")
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--take", action="append", required=True, metavar="CATEGORY[:SPLIT]=N")
     parser.add_argument("--limit", type=int, help="at most this many units in all")
     parser.add_argument("--peak", action="store_true", help="allow a call in DeepSeek peak hours")
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=WORKERS)
     args = parser.parse_args(argv)
     rows, _ = load_units()
     chosen = list(dict.fromkeys(r for spec in args.take for r in take(labelling_rows(rows), spec)))

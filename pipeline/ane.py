@@ -11,8 +11,6 @@ directory is self-contained: the tokenizer files and settings.json hold what a r
 with the digests of the checkpoint, the packages and the source code.
 """
 
-import argparse
-import hashlib
 import logging
 import sys
 import warnings
@@ -22,10 +20,10 @@ import numpy as np
 import torch
 from torch import nn
 
-from jsonl import DATA, file_digest, sha256, write_json
-from model import CHECKPOINT, TASKS, load, load_tokenizer
-from tagging import CLOSING, MAX_TOKENS, OPENING, OPTION_TRAILING, TAG_NAMES
-from units import DECISION
+from jsonl import DATA, short_digest, write_json
+from model import TASKS, load, load_tokenizer
+from pack import common_settings, convert_main
+from tagging import MAX_TOKENS
 
 # external: coremltools warns on import that the installed torch is newer than the tested one
 logging.getLogger("coremltools").setLevel(logging.ERROR)
@@ -52,16 +50,10 @@ def compress(model):
 
 
 def directory_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    for item in sorted(p for p in path.rglob("*") if p.is_file()):
-        digest.update(item.relative_to(path).as_posix().encode())
-        digest.update(item.read_bytes())
-    return digest.hexdigest()[:16]
-
-
-def source_digest() -> str:
-    sources = sorted(Path(__file__).parent.glob("*.py"))
-    return sha256("".join(f"{p.name}:{sha256(p.read_text())}\n" for p in sources))
+    files = sorted(p for p in path.rglob("*") if p.is_file())
+    return short_digest(
+        b"".join(p.relative_to(path).as_posix().encode() + p.read_bytes() for p in files)
+    )
 
 
 class Norm(nn.Module):
@@ -204,22 +196,16 @@ def build(model: Path, output: Path, quantize: bool) -> None:
         convert_task(tagger, task, output, quantize)
     tokenizer = load_tokenizer(model)
     tokenizer.save_pretrained(output)
+    common = common_settings(model, tokenizer)
     write_json(
         output / "settings.json",
         {
-            "pad_token_id": tokenizer.pad_token_id,
-            "tags": TAG_NAMES,
-            "max_tokens": MAX_TOKENS,
-            "trim": {"closing": CLOSING, "opening": OPENING, "option_trailing": OPTION_TRAILING},
-            "decision": {"pattern": DECISION.pattern, "flags": "i"},
+            **common,
             "precision": "float16" if quantize else "float32",
             "coremltools": ct.__version__,
             "torch": torch.__version__,
             "digests": {
-                "source": source_digest(),
-                "checkpoint": {
-                    task: file_digest(model / task / "model.safetensors") for task in TASKS
-                },
+                **common["digests"],
                 "packages": {
                     task: directory_digest(output / f"{task}.mlpackage") for task in TASKS
                 },
@@ -229,15 +215,7 @@ def build(model: Path, output: Path, quantize: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, default=CHECKPOINT)
-    parser.add_argument("--output", type=Path, default=COREML_ANE)
-    args = parser.parse_args(argv)
-    if args.output.exists():
-        print(f"convert-ane: {args.output} exists", file=sys.stderr)
-        return 1
-    build(args.model, args.output, quantize=True)
-    return 0
+    return convert_main("convert-ane", __doc__, COREML_ANE, build, argv)
 
 
 if __name__ == "__main__":

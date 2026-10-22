@@ -38,10 +38,6 @@ MAX_ATTEMPTS = 5
 NOT_BILLED = {429, 500, 502, 503}
 
 
-def now() -> datetime:
-    return datetime.now(UTC)
-
-
 def is_peak(moment: datetime) -> bool:
     return moment.weekday() < 5 and any(a <= moment.hour < b for a, b in PEAK_HOURS)
 
@@ -148,23 +144,23 @@ def send(session: Session, body: dict[str, object]) -> tuple[str, str]:
     worst = worst_cost(body["messages"])  # type: ignore[arg-type]
     attempt = 0
     while True:
-        if near_peak(now()) and not session.allow_peak:
+        if near_peak(datetime.now(UTC)) and not session.allow_peak:
             raise PeakHours
-        peak = is_peak(now())
+        peak = is_peak(datetime.now(UTC))
         reservation = session.ledger.reserve(worst)
         try:
             response = session.client.chat.completions.create(**body)
         except APIStatusError as error:
             if error.status_code not in NOT_BILLED:
                 raise
-            session.ledger.settle(reservation, worst, {"cost": 0.0}, now())
+            session.ledger.settle(reservation, worst, {"cost": 0.0}, datetime.now(UTC))
             failure: Exception = error
         except (APIConnectionError, APITimeoutError) as error:
             failure = error  # the server may have billed it: the reservation stays at its maximum
         else:
             usage = getattr(response, "usage", None)
             fields = usage_fields(usage, peak=peak) if usage else {"cost": worst}
-            session.ledger.settle(reservation, worst, fields, now())
+            session.ledger.settle(reservation, worst, fields, datetime.now(UTC))
             choice = response.choices[0]
             return choice.message.content or "", str(choice.finish_reason or "stop")
         attempt += 1
