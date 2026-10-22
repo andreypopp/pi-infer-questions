@@ -6,16 +6,11 @@ struct Unit {
     let context: Int
 }
 
-private let item = try! NSRegularExpression(pattern: #"\s*(?:[-*+•]|\d+[.)]|[A-Za-z][.)])\s"#)
+private let item = regex(#"\s*(?:[-*+•]|\d+[.)]|[A-Za-z][.)])\s"#)
 private let closers: Set<Unicode.Scalar> = [")", "]", "\"", "'", "”"]
 
-private func string(_ text: ArraySlice<Unicode.Scalar>) -> String {
-    String(String.UnicodeScalarView(text))
-}
-
-private func isItem(_ text: ArraySlice<Unicode.Scalar>) -> Bool {
-    let line = string(text)
-    return item.firstMatch(in: line, options: [.anchored], range: NSRange(location: 0, length: line.utf16.count)) != nil
+private func itemFlags(_ mapped: Mapped, _ bounds: [Range<Int>]) -> [Bool] {
+    bounds.map { Line(mapped.text[$0]).starting(item) != nil }
 }
 
 private func endsWithQuestion(_ text: ArraySlice<Unicode.Scalar>) -> Bool {
@@ -30,6 +25,7 @@ private func endsWithQuestion(_ text: ArraySlice<Unicode.Scalar>) -> Bool {
 /// of the heading or bold line at the start of a unit, with its line break.
 func units(_ mapped: Mapped, _ headings: Set<Int>) -> [Unit] {
     let bounds = mapped.lines
+    let isItem = itemFlags(mapped, bounds)
     var runs: [[Int]] = [[]]
     for number in bounds.indices {
         if !mapped.text.isBlank(bounds[number]) {
@@ -40,9 +36,9 @@ func units(_ mapped: Mapped, _ headings: Set<Int>) -> [Unit] {
     }
     var groups: [[Int]] = []
     for run in runs where !run.isEmpty {
-        if let before = groups.last, isItem(mapped.text[bounds[run[0]]]),
+        if let before = groups.last, isItem[run[0]],
            headings.contains(before[0]) || endsWithQuestion(mapped.text[bounds[before[before.count - 1]]])
-            || before.contains(where: { isItem(mapped.text[bounds[$0]]) }) {
+            || before.contains(where: { isItem[$0] }) {
             groups[groups.count - 1] += run
         } else {
             groups.append(run)
@@ -74,7 +70,8 @@ private func markerKind(_ line: ArraySlice<Unicode.Scalar>) -> Int {
 /// item with its nested items, and each run of other top-level items are units.
 private func segments(_ unit: Mapped) -> [Mapped] {
     let lines = unit.lines
-    let items = lines.indices.filter { isItem(unit.text[lines[$0]]) }
+    let isItem = itemFlags(unit, lines)
+    let items = lines.indices.filter { isItem[$0] }
     guard let first = items.first else { return [unit] }
     let top = items.filter { markerKind(unit.text[lines[$0]]) == markerKind(unit.text[lines[first]]) }
     let asks = top.map { start in

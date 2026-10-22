@@ -1,9 +1,5 @@
 import Foundation
 
-private func regex(_ pattern: String) -> NSRegularExpression {
-    try! NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
-}
-
 private let footnote = regex(#"\s*\[\^[^\]]+\]:"#)
 private let atxOpen = regex(#" {0,3}#{1,6}(?:\s+|$)"#)
 private let atxClose = regex(#"\s+#+\s*$"#)
@@ -19,40 +15,9 @@ private let emphasis = [
     regex(#"(?<!\w)_(?=[^\s_])|(?<=[^\s_])_(?!\w)"#),
 ]
 
-private struct Line {
-    let string: String
-    let scalarAt: [Int]
-
-    init(_ scalars: ArraySlice<Unicode.Scalar>) {
-        string = String(String.UnicodeScalarView(scalars))
-        var table: [Int] = []
-        for (index, scalar) in scalars.enumerated() {
-            table += Array(repeating: index, count: scalar.utf16.count)
-        }
-        scalarAt = table + [scalars.count]
-    }
-
-    func scalars(_ range: NSRange) -> Range<Int> {
-        scalarAt[range.location]..<scalarAt[range.location + range.length]
-    }
-
-    func matches(_ expression: NSRegularExpression) -> [NSTextCheckingResult] {
-        expression.matches(in: string, range: NSRange(location: 0, length: string.utf16.count))
-    }
-
-    func matchesStart(_ expression: NSRegularExpression) -> Bool {
-        firstAtStart(expression) != nil
-    }
-
-    func firstAtStart(_ expression: NSRegularExpression) -> NSTextCheckingResult? {
-        expression.firstMatch(in: string, options: [.anchored], range: NSRange(location: 0, length: string.utf16.count))
-    }
-}
-
 /// The indexes of the characters of the inline markup in a line. Code spans and autolink URLs keep
 /// their text.
-private func inlineDrops(_ scalars: ArraySlice<Unicode.Scalar>) -> Set<Int> {
-    let line = Line(scalars)
+private func inlineDrops(_ line: Line) -> Set<Int> {
     var protected = Set<Int>()
     var drops = Set<Int>()
     func drop(_ range: Range<Int>) {
@@ -83,12 +48,11 @@ private func inlineDrops(_ scalars: ArraySlice<Unicode.Scalar>) -> Set<Int> {
     return drops
 }
 
-private func frontMatterLines(_ lines: [String]) -> Int {
+private func frontMatterLines(_ lines: [Line]) -> Int {
     guard let first = lines.first,
-          first.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else { return 0 }
+          first.string.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else { return 0 }
     for (number, line) in lines.enumerated().dropFirst() {
-        let range = NSRange(location: 0, length: line.utf16.count)
-        if let found = frontMatterEnd.firstMatch(in: line, options: [.anchored], range: range), found.range == range {
+        if let found = line.starting(frontMatterEnd), found.range == line.full {
             return number + 1
         }
     }
@@ -100,29 +64,42 @@ private func frontMatterLines(_ lines: [String]) -> Int {
 func normalise(_ text: Scalars) -> (mapped: Mapped, headings: Set<Int>) {
     let mapped = Mapped(text: text, origin: Array(text.indices))
     let bounds = mapped.lines
-    var lines = bounds.map { range in mapped.text[range].map { $0 == "\r" ? " " : $0 } }
-    let strings = lines.map { String(String.UnicodeScalarView($0)) }
-    for index in 0..<frontMatterLines(strings) { lines[index] = [] }
-    var kept = Set<Int>()
-    let prose = proseParagraphs(lines.map { String(String.UnicodeScalarView($0)) })
-    for range in prose.kept {
-        if !Line(lines[range.lowerBound][...]).matchesStart(footnote) { kept.formUnion(range) }
-    }
-    var headings = Set<Int>()
-    for range in prose.headings { headings.formUnion(range) }
+    var lines = bounds.map { range in Line(mapped.text[range].map { $0 == "\r" ? " " : $0 }) }
+    for index in 0..<frontMatterLines(lines) { lines[index] = Line([]) }
+    let prose = proseParagraphs(lines.map(\.string))
+    let kept = Set(prose.kept.filter { lines[$0.lowerBound].starting(footnote) == nil }.joined())
+    let headings = Set(prose.headings.joined())
     var mask = [Bool](repeating: true, count: mapped.text.count)
     for (number, range) in bounds.enumerated() {
-        if !kept.contains(number) {
+        guard kept.contains(number) else {
             for index in range { mask[index] = false }
-        } else {
-            for index in inlineDrops(lines[number][...]) { mask[range.lowerBound + index] = false }
-            if headings.contains(number) {
-                let line = Line(lines[number][...])
-                for marker in [line.firstAtStart(atxOpen), line.matches(atxClose).first] {
-                    if let marker { for index in line.scalars(marker.range) { mask[range.lowerBound + index] = false } }
-                }
+            continue
+        }
+        let line = lines[number]
+        var drops = inlineDrops(line)
+        if headings.contains(number) {
+            for marker in [line.starting(atxOpen), line.first(atxClose)] {
+                if let marker { drops.formUnion(line.scalars(marker.range)) }
             }
         }
+        for index in drops { mask[range.lowerBound + index] = false }
     }
     return (mapped.keep(mask), headings)
+}
+
+private let singleLineCodeSpan = regex(#"(`+)[^`\n]+?\1"#)
+
+/// Widens a range of the model input to the original Markdown, over every code span it overlaps.
+func widening(_ markdown: Scalars) -> (_ origin: [Int], _ range: Range<Int>) -> Range<Int> {
+    let line = Line(markdown)
+    let codes = line.matches(singleLineCodeSpan).map { line.scalars($0.range) }
+    return { origin, range in
+        var start = origin[range.lowerBound]
+        var end = origin[range.upperBound - 1] + 1
+        for code in codes where code.lowerBound < end && start < code.upperBound {
+            start = min(start, code.lowerBound)
+            end = max(end, code.upperBound)
+        }
+        return start..<end
+    }
 }

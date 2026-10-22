@@ -51,7 +51,7 @@ let moves = 0;
 let lastHoverMove = 0;
 let tui: TUI | undefined;
 let editor: Pick<ExtensionUIContext, "getEditorText" | "setEditorText"> | undefined;
-const wrapped = new WeakSet<TUI>();
+const patched = new WeakSet<TUI>();
 
 const blocks = (cps: string[]): [number, number][] => {
   const found: [number, number][] = [];
@@ -59,7 +59,8 @@ const blocks = (cps: string[]): [number, number][] => {
   let end = 0;
   let fenced = false;
   for (let start = 0; start <= cps.length; ) {
-    const stop = cps.indexOf("\n", start) < 0 ? cps.length : cps.indexOf("\n", start);
+    const newline = cps.indexOf("\n", start);
+    const stop = newline < 0 ? cps.length : newline;
     const line = cps.slice(start, stop).join("");
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
     if (!line.trim() && !fenced) {
@@ -78,7 +79,7 @@ const blocks = (cps: string[]): [number, number][] => {
 interface Reply {
   quote: string;
   answer: string;
-  reset?: boolean;
+  overwrite?: boolean;
 }
 interface Cell {
   row: number;
@@ -179,24 +180,23 @@ export default function (pi: ExtensionAPI) {
     editor = ctx.ui;
     ctx.ui.setWidget(TYPE, (current) => {
       tui = current;
-      const terminal = current.terminal as { write(data: string): void; [TYPE]?: true };
-      if (!terminal[TYPE]) {
-        terminal[TYPE] = true;
+      const terminal = current.terminal as { write(data: string): void };
+      if (!patched.has(current)) {
+        patched.add(current);
         const write = terminal.write.bind(terminal);
         terminal.write = (data) => write(data.includes(BUTTON_MOTION) ? data + ANY_MOTION : data);
-      }
-      const mouse = current as unknown as { handleMouseEvent(raw: unknown): void };
-      if (mouse.handleMouseEvent && !wrapped.has(current)) {
-        wrapped.add(current);
-        const handle = mouse.handleMouseEvent.bind(current);
-        mouse.handleMouseEvent = (raw) => {
-          const seen = ++moves;
-          handle(raw);
-          if (hovered !== undefined && lastHoverMove !== seen) {
-            hovered = undefined;
-            current.requestRender();
-          }
-        };
+        const mouse = current as unknown as { handleMouseEvent?(raw: unknown): void };
+        if (mouse.handleMouseEvent) {
+          const handle = mouse.handleMouseEvent.bind(current);
+          mouse.handleMouseEvent = (raw) => {
+            const seen = ++moves;
+            handle(raw);
+            if (hovered !== undefined && lastHoverMove !== seen) {
+              hovered = undefined;
+              current.requestRender();
+            }
+          };
+        }
       }
       if ((current as unknown as { altScreenActive?: boolean }).altScreenActive) terminal.write(ANY_MOTION);
       return { render: () => [], invalidate() {} };
@@ -209,7 +209,7 @@ export default function (pi: ExtensionAPI) {
     for (const block of message.content) {
       const markdown = block.type === "text" ? block.text?.trim() : undefined;
       if (!markdown) continue;
-      native!
+      native
         .questions(markdown)
         .then((json) => {
           const cps = Array.from(markdown);
@@ -234,36 +234,38 @@ export default function (pi: ExtensionAPI) {
     const cps = Array.from(markdown);
     const markdownTheme = getMarkdownTheme();
     const root = new Container();
+    const cut = (from: number, to: number) => cps.slice(from, to).join("");
+    const quotes = questions.map(({ range: [start, end] }) =>
+      cut(start, end)
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .split("\n")
+        .map(plain)
+        .map((line) => line.replace(/[ \t]+/g, " ").trim())
+        .filter(Boolean)
+        .join("\n"),
+    );
     blocks(cps).forEach(([from, to], index) => {
       if (index) root.addChild(new Spacer(1));
       const marks: { at: number; text: string; reply?: Reply }[] = [];
-      for (const question of questions) {
+      questions.forEach((question, number) => {
         const [start, end] = question.range;
-        if (start >= to || end <= from) continue;
-        const quote = cps
-          .slice(start, end)
-          .join("")
-          .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-          .split("\n")
-          .map(plain)
-          .map((line) => line.replace(/[ \t]+/g, " ").trim())
-          .filter(Boolean)
-          .join("\n");
+        if (start >= to || end <= from) return;
+        const quote = quotes[number];
         for (const [a, b] of question.options) {
           if (a < from || b > to) continue;
-          const answer = plain(cps.slice(a, b).join(""));
-          marks.push({ at: a, text: OPEN, reply: { quote, answer } }, { at: b, text: CLOSE });
+          marks.push({ at: a, text: OPEN, reply: { quote, answer: plain(cut(a, b)) } }, { at: b, text: CLOSE });
         }
-        if (question.kind === "open" && end <= to) {
-          marks.push({ at: end, text: ` ${OPEN}Answer${CLOSE}`, reply: { quote, answer: "" } });
-        }
-        if (end <= to && question.kind !== "open") {
-          const answers = question.kind === "yes_no" ? ["Yes", "No"] : question.options.length === 1 ? ["Yes"] : [];
-          const replies: Reply[] = [...answers.map((answer) => ({ quote, answer })), { quote, answer: "", reset: true }];
-          replies.forEach((reply, n) => marks.push({ at: end, text: `${n ? "/" : " "}${OPEN}${reply.answer || "Other"}${CLOSE}`, reply }));
-        }
-      }
-      const ordered = marks.map((mark, number) => ({ ...mark, number })).sort((a, b) => a.at - b.at || a.number - b.number);
+        if (end > to) return;
+        const labels =
+          question.kind === "open"
+            ? ["Answer"]
+            : [...(question.kind === "yes_no" ? ["Yes", "No"] : question.options.length === 1 ? ["Yes"] : []), "Other"];
+        labels.forEach((label, n) => {
+          const answer = label === "Answer" || label === "Other" ? "" : label;
+          marks.push({ at: end, text: `${n ? "/" : " "}${OPEN}${label}${CLOSE}`, reply: { quote, answer, overwrite: label === "Other" } });
+        });
+      });
+      const ordered = [...marks].sort((a, b) => a.at - b.at);
       const text = cps.slice(from, to);
       for (const mark of [...ordered].reverse()) text.splice(mark.at - from, 0, mark.text);
       const replies = ordered.filter((mark) => mark.reply).map((mark) => mark.reply!);
@@ -275,9 +277,9 @@ export default function (pi: ExtensionAPI) {
           const head = `${quoted}\n\n`;
           const block = head + reply.answer;
           const found = current.indexOf(head);
-          const at = found === 0 || (found > 0 && current.slice(found - 2, found) === "\n\n") ? found : -1;
+          const at = found > 0 && current.slice(found - 2, found) !== "\n\n" ? -1 : found;
           if (at < 0) editor.setEditorText(current.trim() ? `${current}\n\n${block}` : block);
-          else if (reply.answer || reply.reset) {
+          else if (reply.answer || reply.overwrite) {
             const next = current.indexOf("\n\n> ", at + head.length);
             editor.setEditorText(current.slice(0, at) + block + (next < 0 ? "" : current.slice(next)));
           }

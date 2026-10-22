@@ -1,6 +1,6 @@
 import Foundation
-struct Tokenizer: Sendable {
-    struct Encoding: Equatable, Sendable {
+struct Tokenizer {
+    struct Encoding {
         let ids: [Int]
         let offsets: [Range<Int>]
     }
@@ -17,7 +17,7 @@ struct Tokenizer: Sendable {
     private let unknown: Int
     private let classifier: Int
     private let separator: Int
-    let maxTokens: Int
+    private let maxTokens: Int
 
     init(json: Data, maxTokens: Int) throws {
         guard let root = try JSONSerialization.jsonObject(with: json) as? [String: Any],
@@ -71,7 +71,7 @@ struct Tokenizer: Sendable {
             while stripping, end > start, normalised[end - 1].properties.isWhitespace { end -= 1 }
             guard start < end else { return }
             for piece in pieces(normalised, start..<end) {
-                tokens += merge(normalised[piece], alignment: Array(alignment[piece]))
+                tokens += merge(normalised[piece], alignment: alignment[piece])
             }
         }
         while index < normalised.count {
@@ -98,7 +98,7 @@ struct Tokenizer: Sendable {
     }
 
     private func nfc(_ text: Scalars) -> (Scalars, [Range<Int>]) {
-        let string = String(String.UnicodeScalarView(text))
+        let string = text.string
         if string.precomposedStringWithCanonicalMapping.unicodeScalars.elementsEqual(text) {
             return (text, text.indices.map { $0..<($0 + 1) })
         }
@@ -111,8 +111,7 @@ struct Tokenizer: Sendable {
             for composed in String(cluster).precomposedStringWithCanonicalMapping.unicodeScalars {
                 var length = 1
                 while consumed + length < source.count,
-                      Array(String(String.UnicodeScalarView(source[consumed..<(consumed + length)]))
-                          .precomposedStringWithCanonicalMapping.unicodeScalars) != [composed] {
+                      Array(source[consumed..<(consumed + length)].string.precomposedStringWithCanonicalMapping.unicodeScalars) != [composed] {
                     length += 1
                 }
                 result.append(composed)
@@ -163,7 +162,7 @@ struct Tokenizer: Sendable {
         return found
     }
 
-    private func merge(_ piece: ArraySlice<Unicode.Scalar>, alignment: [Range<Int>]) -> [(id: Int, range: Range<Int>)] {
+    private func merge(_ piece: ArraySlice<Unicode.Scalar>, alignment: ArraySlice<Range<Int>>) -> [(id: Int, range: Range<Int>)] {
         var symbols: [(text: String, range: Range<Int>)] = []
         for (scalar, range) in zip(piece, alignment) {
             for byte in String(scalar).utf8 { symbols.append((byteCharacters[Int(byte)], range)) }

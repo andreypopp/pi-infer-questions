@@ -10,10 +10,11 @@ struct Settings: Decodable {
     struct Pattern: Decodable {
         let pattern: String
         let flags: String
+    }
 
-        var options: NSRegularExpression.Options {
-            flags.contains("i") ? [.caseInsensitive] : []
-        }
+    struct Limits: Decodable {
+        let rows: Int
+        let tokens: Int
     }
 
     let padTokenId: Int
@@ -21,6 +22,7 @@ struct Settings: Decodable {
     let maxTokens: Int
     let trim: Trim
     let decision: Pattern
+    let batch: Limits?
 
     static func load(_ directory: URL) throws -> Settings {
         let decoder = JSONDecoder()

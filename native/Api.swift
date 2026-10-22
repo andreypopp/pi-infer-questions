@@ -51,7 +51,7 @@ public func questions(_ markdown: UnsafePointer<CChar>, _ trace: Bool, _ failure
             result = [
                 "questions": questions,
                 "units": analysis.units.enumerated().map { number, unit in
-                    ["text": String(String.UnicodeScalarView(unit.text)), "origin": unit.origin, "context": unit.context, "gated": analysis.gated.contains(number)] as [String: Any]
+                    ["text": unit.text.string, "origin": unit.origin, "context": unit.context, "gated": analysis.gated.contains(number)] as [String: Any]
                 },
                 "question_tokens": json(analysis.questionTrace, "units", analysis.gated),
                 "option_tokens": json(analysis.optionTrace, "questions", analysis.choices),

@@ -1,4 +1,4 @@
-struct Decoding: Sendable {
+struct Decoding {
     let closing: [Unicode.Scalar: Unicode.Scalar]
     let opening: [Unicode.Scalar: Unicode.Scalar]
 }

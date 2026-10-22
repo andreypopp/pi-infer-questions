@@ -25,7 +25,7 @@ struct Models {
     init(directory: URL, settings: Settings) throws {
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .cpuAndNeuralEngine
-        models = try Dictionary(uniqueKeysWithValues: ["question", "option"].map { task in
+        models = try Dictionary(uniqueKeysWithValues: settings.tags.keys.sorted().map { task in
             (task, try MLModel(contentsOf: directory.appendingPathComponent("\(task).mlmodelc"), configuration: configuration))
         })
         padTokenId = settings.padTokenId
@@ -58,15 +58,15 @@ struct Models {
                 placed.append((unit, offset))
                 offset += ids[unit].count
             }
-            let output = try predict(task, inputIds, positions, segments)
+            let best = try predict(task, inputIds, positions, segments, used: offset)
             for (unit, start) in placed {
-                out[unit] = (0..<ids[unit].count).map { output(start + $0) }
+                out[unit] = Array(best[start..<(start + ids[unit].count)])
             }
         }
         return (out, packs)
     }
 
-    private func predict(_ task: String, _ ids: MLMultiArray, _ positions: MLMultiArray, _ segments: MLMultiArray) throws -> (Int) -> Int {
+    private func predict(_ task: String, _ ids: MLMultiArray, _ positions: MLMultiArray, _ segments: MLMultiArray, used: Int) throws -> [Int] {
         lock.lock()
         defer { lock.unlock() }
         let result = try models[task]!.prediction(from: MLDictionaryFeatureProvider(dictionary: [
@@ -85,11 +85,7 @@ struct Models {
             let index = tag * strides[1] + position * strides[3]
             return half ? Float(pointer.load(fromByteOffset: index * 2, as: Float16.self)) : pointer.load(fromByteOffset: index * 4, as: Float.self)
         }
-        var best: [Int] = []
-        for position in 0..<length {
-            best.append((0..<classes).max { value($0, position) < value($1, position) } ?? 0)
-        }
-        return { best[$0] }
+        return (0..<used).map { position in (0..<classes).max { value($0, position) < value($1, position) } ?? 0 }
     }
 }
 #endif

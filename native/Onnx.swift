@@ -6,16 +6,7 @@ private struct Failure: Error, CustomStringConvertible {
     let description: String
 }
 
-private struct Batch: Decodable {
-    struct Limits: Decodable {
-        let rows: Int
-        let tokens: Int
-    }
-
-    let batch: Limits
-}
-
-private func batches(_ lengths: [Int], _ limits: Batch.Limits) -> [[Int]] {
+private func batches(_ lengths: [Int], _ limits: Settings.Limits) -> [[Int]] {
     var found: [[Int]] = []
     for index in lengths.indices.sorted(by: { (lengths[$0], $0) < (lengths[$1], $1) }) {
         if let last = found.last, last.count < limits.rows, (last.count + 1) * lengths[index] <= limits.tokens {
@@ -35,7 +26,7 @@ struct Models {
     private let inputNames: [UnsafePointer<CChar>?]
     private let outputNames: [UnsafePointer<CChar>?]
     private let padTokenId: Int
-    private let limits: Batch.Limits
+    private let limits: Settings.Limits
 
     init(directory: URL, settings: Settings) throws {
         guard let api = OrtGetApiBase()?.pointee.GetApi(UInt32(ORT_API_VERSION)) else { throw CocoaError(.coderReadCorrupt) }
@@ -47,7 +38,7 @@ struct Models {
         var options: OpaquePointer?
         try check(api, api.pointee.CreateSessionOptions(&options))
         var created: [String: OpaquePointer] = [:]
-        for task in ["question", "option"] {
+        for task in settings.tags.keys.sorted() {
             var session: OpaquePointer?
             try check(api, api.pointee.CreateSession(environment, directory.appendingPathComponent("\(task).onnx").path, options, &session))
             created[task] = session
@@ -61,7 +52,8 @@ struct Models {
         inputNames = names(["input_ids", "attention_mask"])
         outputNames = names(["logits"])
         padTokenId = settings.padTokenId
-        limits = try JSONDecoder().decode(Batch.self, from: Data(contentsOf: directory.appendingPathComponent("settings.json"))).batch
+        guard let limits = settings.batch else { throw CocoaError(.coderReadCorrupt) }
+        self.limits = limits
     }
 
     func tags(_ task: String, _ ids: [[Int]]) throws -> (tags: [[Int]], packs: [[Int]]) {

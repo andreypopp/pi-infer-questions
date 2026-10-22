@@ -1,4 +1,48 @@
+import Foundation
+
 typealias Scalars = [Unicode.Scalar]
+
+extension Collection where Element == Unicode.Scalar {
+    var string: String { String(String.UnicodeScalarView(self)) }
+}
+
+func regex(_ pattern: String) -> NSRegularExpression {
+    try! NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
+}
+
+struct Line {
+    let string: String
+    private let scalarAt: [Int]
+
+    init(_ scalars: some Collection<Unicode.Scalar>) {
+        string = scalars.string
+        var table: [Int] = []
+        table.reserveCapacity(string.utf16.count + 1)
+        for (index, scalar) in scalars.enumerated() {
+            for _ in 0..<scalar.utf16.count { table.append(index) }
+        }
+        table.append(scalars.count)
+        scalarAt = table
+    }
+
+    var full: NSRange { NSRange(location: 0, length: string.utf16.count) }
+
+    func scalars(_ range: NSRange) -> Range<Int> {
+        scalarAt[range.location]..<scalarAt[range.location + range.length]
+    }
+
+    func matches(_ expression: NSRegularExpression) -> [NSTextCheckingResult] {
+        expression.matches(in: string, range: full)
+    }
+
+    func first(_ expression: NSRegularExpression) -> NSTextCheckingResult? {
+        expression.firstMatch(in: string, range: full)
+    }
+
+    func starting(_ expression: NSRegularExpression) -> NSTextCheckingResult? {
+        expression.firstMatch(in: string, options: [.anchored], range: full)
+    }
+}
 func isSpace(_ scalar: Unicode.Scalar) -> Bool {
     switch scalar.value {
     case 0x09...0x0D, 0x1C...0x20, 0x85, 0xA0, 0x1680, 0x2000...0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000:
@@ -8,7 +52,7 @@ func isSpace(_ scalar: Unicode.Scalar) -> Bool {
     }
 }
 
-struct Mapped: Equatable {
+struct Mapped {
     var text: Scalars
     var origin: [Int]
 
