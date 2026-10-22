@@ -1,0 +1,17 @@
+FROM docker.io/library/swift:6.4-jammy
+ARG TARGETARCH
+ARG NODE_VERSION=24.22.1
+ARG NODE_SHA256_ARM64=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
+ARG NODE_SHA256_AMD64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends cmake curl make xz-utils ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN case "$TARGETARCH" in \
+      arm64) node=arm64; sha=$NODE_SHA256_ARM64 ;; \
+      amd64) node=x64; sha=$NODE_SHA256_AMD64 ;; \
+    esac \
+ && curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$node.tar.xz \
+ && echo "$sha  /tmp/node.tar.xz" | sha256sum -c - \
+ && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+ && rm /tmp/node.tar.xz
+WORKDIR /work

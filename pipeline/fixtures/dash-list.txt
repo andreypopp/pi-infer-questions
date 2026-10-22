@@ -1,0 +1,4 @@
+For the cache size, which value should the tool use?
+- Only the small cache, with eviction.
+- Both sizes, and the tool selects by free memory.
+- Only the large cache.

@@ -1,0 +1,9 @@
+1. Model cost. The nightly job uses the large model at $0.0068 per request. With the small model, the cost is
+   $0.0008 per request. Do you want to keep the large model for all requests? The other choice is the large
+   model for the premium tier only, with the small model for the rest.
+
+2. Latency bias. Timeouts and the retry filter remove more long requests than short ones. Is it enough that the report names this as a known bias? Or must I fix it before the launch, for example by raising the 30-second timeout for long requests?
+
+3. Budget. The plan keeps the $50 cap. If a run would exceed the remaining budget, I make the run smaller. Do you want to raise the cap? Or must the benchmark stay at 400 requests even if I have to use less data?
+
+4. Parser limit. An inline code span that looks like a sentence end (a. B) can split one block into two. Is this acceptable as a known limit? Or must the parser skip sentence ends inside backtick spans before the first release?

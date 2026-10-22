@@ -1,0 +1,13 @@
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.envrc
+/build/
+/build-linux/
+/models/
+*.node
+/libonnxruntime.so*
+/models-linux/
