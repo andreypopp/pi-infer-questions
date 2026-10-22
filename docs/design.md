@@ -138,6 +138,8 @@ the selected model once on the held-out split.
   backtick, else the start over an opening one, else cut the edge one.
 - Extend the end over the combining marks that follow it.
 - Drop a span that is empty or holds only trailing characters.
+- Drop a question span without a letter (a lone list marker such as
+  `2.`).
 
 Ranges in the result are Unicode code-point offsets into the original
 Markdown. After the mapping, a range grows over every code span of the

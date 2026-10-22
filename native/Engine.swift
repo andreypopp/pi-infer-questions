@@ -65,7 +65,7 @@ final class Engine {
         let (tagged, questionTrace) = try tag("question", gated.map { all[$0].text }, trailing: [])
         let widen = widening(markdown)
         var found = zip(gated, tagged).flatMap { unit, spans in
-            afterContext(spans, all[unit].context).map {
+            afterContext(spans, all[unit].context).filter { all[unit].text[$0.span].contains(where: isLetter) }.map {
                 Found(unit: unit, span: $0.span, range: widen(all[unit].origin, $0.span), kind: kinds[$0.kind])
             }
         }
@@ -87,4 +87,10 @@ final class Engine {
         let out = texts.indices.map { spans(in: texts[$0], offsets: encoded[$0].offsets, tags: tags[$0], decoding, trailing: trailing) }
         return (out, Trace(tokens: encoded, packs: packs))
     }
+}
+
+private let letters: Set<Unicode.GeneralCategory> = [.uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter]
+
+private func isLetter(_ scalar: Unicode.Scalar) -> Bool {
+    letters.contains(scalar.properties.generalCategory)
 }

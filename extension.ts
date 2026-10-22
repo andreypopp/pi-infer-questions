@@ -212,10 +212,7 @@ export default function (pi: ExtensionAPI) {
       native
         .questions(markdown)
         .then((json) => {
-          const cps = Array.from(markdown);
-          const questions = (JSON.parse(json) as Analysis[]).filter(
-            (q) => q.options.length > 0 || cps.slice(q.range[0], q.range[1]).includes("?"),
-          );
+          const questions = JSON.parse(json) as Analysis[];
           if (questions.length === 0) return;
           texts.add(markdown);
           pi.appendEntry<Data>(TYPE, { markdown, questions });

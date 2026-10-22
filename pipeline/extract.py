@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from corpus import has_letters
 from model import CHECKPOINT, load, load_tokenizer, torch_taggers
 from normalise import normalise
 from tagging import KINDS, MAX_TOKENS, OPTION_TRAILING, after_context, message_range, token_count
@@ -12,10 +13,11 @@ from units import category, units
 
 
 def ask(taggers: dict, texts: list[str], contexts: list[int]) -> list[list[tuple]]:
-    """(span, kind) of each question of each text, after the first `context` characters."""
+    """(span, kind) of each question with a letter in each text, after the first `context`
+    characters."""
     return [
-        [((a, b), KINDS[k]) for a, b, k in after_context(found, context)]
-        for found, context in zip(taggers["question"](texts), contexts, strict=True)
+        [((a, b), KINDS[k]) for a, b, k in after_context(found, context) if has_letters(text[a:b])]
+        for text, found, context in zip(texts, taggers["question"](texts), contexts, strict=True)
     ]
 
 
