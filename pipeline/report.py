@@ -9,11 +9,11 @@ import sys
 from collections import Counter
 
 from corpus import (
+    SAMPLES,
     SPLITS,
     Row,
     labelling_rows,
     load_units,
-    samples,
     uniform_order,
 )
 from deepseek import price
@@ -45,13 +45,11 @@ def call_cost(system: int, tokens: int, kind: str) -> float:
 def set_cost(rows: list[Row], tokens: dict[str, int], system: int) -> dict[str, float | int]:
     """Calls and off-peak dollars of labelling rows; the system prompt is cached after the first
     call."""
-    total = sum(
-        samples(row) * call_cost(system, tokens[row.text], category(row.text)) for row in rows
-    )
+    total = sum(SAMPLES * call_cost(system, tokens[row.text], category(row.text)) for row in rows)
     first_call = price(0, system, 0, peak=False) - price(system, 0, 0, peak=False)
     return {
         "units": len(rows),
-        "calls": sum(samples(row) for row in rows),
+        "calls": SAMPLES * len(rows),
         "dollars": round(total + first_call, 4),
     }
 

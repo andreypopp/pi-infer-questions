@@ -21,7 +21,7 @@ UNITS_META = DATA / "units.json"
 SEED = 0
 SHARES = (("eval", 0.15), ("dev", 0.10))
 SPLITS = ("eval", "dev", "train")
-HELD_OUT_SAMPLES = 3
+SAMPLES = 3
 
 
 @dataclass(frozen=True)
@@ -174,10 +174,6 @@ def load_units() -> tuple[list[Row], dict[str, int]]:
 
 def uniform_order(rows: Iterable[Row]) -> list[Row]:
     return sorted(rows, key=lambda row: sha256(row.text))
-
-
-def samples(row: Row) -> int:
-    return HELD_OUT_SAMPLES if row.split in ("dev", "eval") else 1
 
 
 def has_letters(text: str) -> bool:

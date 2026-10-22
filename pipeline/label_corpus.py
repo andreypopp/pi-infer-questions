@@ -4,11 +4,11 @@ import argparse
 import sys
 
 from corpus import (
+    SAMPLES,
     SPLITS,
     Row,
     labelling_rows,
     load_units,
-    samples,
     uniform_order,
 )
 from deepseek import open_session
@@ -43,8 +43,8 @@ def main(argv: list[str] | None = None) -> int:
         if session is None:
             return 1
         before = session.ledger.total
-        counts = run(session, load_prompt(), chosen, LABELS, args.workers)
-        calls = sum(samples(r) for r in chosen)
+        counts = run(session, load_prompt(), chosen, LABELS, args.workers, SAMPLES)
+        calls = SAMPLES * len(chosen)
         print(
             f"label-corpus: {len(chosen)} units, up to {calls} calls, "
             f"{counts}, this run ${session.ledger.total - before:.4f}, "

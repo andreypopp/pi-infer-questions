@@ -10,7 +10,7 @@ from pathlib import Path
 
 from openai import APIError
 
-from corpus import SPLITS, Row, samples
+from corpus import SPLITS, Row
 from deepseek import STOP_SPEND, BudgetExceeded, PeakHours, Session, complete
 from jsonl import DATA, append_jsonl, read_jsonl, sha256
 from tagging import KINDS, Span
@@ -163,11 +163,10 @@ def agreed(results: list[list[Question] | Dropped]) -> list[Question] | None:
     return next(r for r in results if not isinstance(r, Dropped) and canonical(r) == best)
 
 
-def label_row(session: Session, prompt: Prompt, row: Row) -> dict:
+def label_row(session: Session, prompt: Prompt, row: Row, samples: int) -> dict:
     """The record of a row. Its status is labelled, length, invalid or disagree."""
     outcomes = [
-        label_unit(session, prompt, row.text, row.context, f"sample{n}")
-        for n in range(samples(row))
+        label_unit(session, prompt, row.text, row.context, f"sample{n}") for n in range(samples)
     ]
     results = [result for result, _ in outcomes]
     label = results[0] if len(results) == 1 else agreed(results)
@@ -258,10 +257,11 @@ def run(
     rows: list[Row],
     out: Path,
     workers: int,
+    samples: int,
 ) -> dict[str, int]:
-    """Label the rows that `out` does not have yet, appending a record for each. A budget, spend
-    or peak stop ends the run, and an API error leaves its row for a rerun. Returns the count of
-    each status."""
+    """Label the rows that `out` does not have yet, appending a record for each, from `samples`
+    calls each. A budget, spend or peak stop ends the run, and an API error leaves its row for a
+    rerun. Returns the count of each status."""
     done = {r["text"] for r in read_jsonl(out) if current(r, prompt)}
     stop = threading.Event()
     errors: list[str] = []
@@ -272,7 +272,7 @@ def run(
         if stop.is_set():
             return
         try:
-            record = label_row(session, prompt, row)
+            record = label_row(session, prompt, row, samples)
         except (BudgetExceeded, PeakHours):
             stop.set()
             return

@@ -509,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         generation_cost = ledger.total - start
         generations = read_jsonl(GENERATIONS)
         batch_rows, counts, _ = batch_units(generations, [args.batch], session.user)
-        labels = run(session, prompt, batch_rows, LABELS, WORKERS)
+        labels = run(session, prompt, batch_rows, LABELS, WORKERS, 1)
         print(
             f"synth: {len(wanted)} calls requested, stops {sorted(set(stop))}, generation "
             f"${generation_cost:.4f}, labels ${ledger.total - start - generation_cost:.4f}, "

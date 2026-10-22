@@ -27,6 +27,23 @@ different sections are not comparable.
 - **Typed tags against a kind heuristic.** A rule that guessed the kind
   from the first word failed on list items ("2. **Label:** What ...").
   With the kind in the tags, kind accuracy rose from .87 to .97.
+- **Ettin 68M.** One seed against three 32M seeds on the same dev:
+  proposal recall .54 against about .45, false positives 3.2%. Not
+  finished; 32M stays for now.
+- **The whole message as labeller context, and DeepSeek V4 Pro as a
+  judge.** On 300 dev units, the whole message raised units without a
+  two-of-three vote from 2.3% to 7.0% (decision lists 5% to 25%) and
+  dropped real list items. Pro equalled the Flash vote in 49% of the
+  units it judged and gave the same label twice in 60%. Neither is
+  used.
+- **Three samples for every real unit.** One sample differed from the
+  two-of-three vote in 10-14% of proposal, decision-list and `?`
+  units. Train labels now also come from the vote. With three new rules
+  (offers, findings lists, next steps), the new model against the old
+  one on the same new eval labels: false positives 5.1% to 3.0%
+  (decision lists 5.7% to 2.1%), overlap precision .794 to .833, kind
+  accuracy .952 to .974; overlap recall .809 to .772, proposal recall
+  .553 to .490, option F1 .582 to .562.
 - **JEV-9B (a 9B decision model) through MLX.** A faithful port works
   (49 of 50 decisions equal to the reference in bf16), but it takes about
   150 ms and 9 GB for each call. Not used.
@@ -114,8 +131,13 @@ model before this round found 38% of their items on dev.
 - **Core ML on the Neural Engine, rewritten and packed.** 0.75 ms per
   unit with 21 MB process memory (without the Neural Engine's own
   memory). Packing is exact in fp32. This is the shipped path.
-- **Weight quantization.** int8 weights with int4 embeddings shrink the
-  pack without a measured loss; it does not reduce latency.
+- **Weight quantization.** It shrinks the pack and does not reduce
+  latency. int4 embeddings had no measured loss on the lists-round
+  model. On the next model, the option tagger lost .057 option F1 with
+  int8 per-channel weights, with int4 or int8 embeddings; int8 per
+  block (32) had no loss but put 62 convolutions on the CPU. The option
+  tagger now ships in fp16 (63 MB), the question tagger in int8 with
+  int8 embeddings (32 MB).
 - **A Linux CPU backend.** ONNX Runtime through its C API, from the same
   Swift module. A TypeScript port of the pipeline and MLX on the CPU
   were considered and not chosen.

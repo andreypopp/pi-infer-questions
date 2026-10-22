@@ -73,22 +73,24 @@ A reply takes a few milliseconds. See [docs/design.md](docs/design.md).
 
 ## Quality
 
-One held-out evaluation of the shipped model on 2,939 units from real
+One held-out evaluation of the shipped model on 2,958 units from real
 coding-agent replies (PyTorch model; the Neural Engine and ONNX models
 are within .02 on every metric):
 
 | | |
 |---|---|
 | Questions found, with `?` (exact span) | 82% |
-| Questions found, overlapping span | 80% |
-| Proposals without `?` found | 52% |
-| Question F1, exact span / overlapping span | .638 / .812 |
-| Kind accuracy | .949 |
-| Option F1, end to end / with the correct question | .577 / .850 |
-| Units without a question that get one (false positives) | 4.1% |
+| Questions found, overlapping span | 77% |
+| Proposals without `?` found | 49% |
+| Question F1, exact span / overlapping span | .637 / .801 |
+| Kind accuracy | .974 |
+| Option F1, end to end / with the correct question | .562 / .816 |
+| Units without a question that get one (false positives) | 3.0% |
 
-It misses most often a proposal without `?`, and a list of decisions
-without `?` (66% of their items found).
+It misses most often a proposal without `?` and an item of a list of
+decisions without `?`. Units that contain neither `?` nor a decision
+word never reach the model, and this table does not count their
+questions.
 
 ## Train your own model
 

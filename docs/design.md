@@ -71,8 +71,9 @@ text order, each an exact substring with its kind (`choice`, `yes_no`,
 `open`) and, for a choice, its options as exact substrings of the
 question. A wrong answer gets one correction turn.
 
-- Train units get one sample. Dev and eval units get three, and a label
-  needs two equal samples.
+- Every real unit gets three samples, and a label needs two equal
+  samples (`corpus.SAMPLES`); a unit without them is `disagree` and is
+  not trained on. A synthetic unit gets one sample.
 - The prompt's rules include: a proposal that waits for approval is a
   `yes_no` question, also without `?`; examples after a question are its
   options; alternatives joined by "or" are options, also as verbs or
@@ -82,12 +83,16 @@ question. A wrong answer gets one correction turn.
   marker included (a recommendation or go-ahead is `yes_no`, named
   alternatives are `choice`, a request for a fact is `open`), and an
   item that reports status, a finding, a decision already made or the
-  agent's next step is no question.
+  agent's next step is no question; an offer to do something for the
+  user is a `yes_no` question over the offer sentence only; a list of
+  findings, issues or notes is no question, only a request inside it
+  is; a next step is a `yes_no` question only when it waits for a
+  signal from the user.
 - A label is valid only for the prompt digest it was made with. A
   prompt change relabels every unit, real and synthetic.
 - Spend: `data/ledger.jsonl` reserves the worst case before each call
-  and settles from the usage. The cap is $50 (`LIMIT`); a run starts no
-  new unit above $47 (`STOP_SPEND`). Calls in DeepSeek peak hours need
+  and settles from the usage. The cap is $65 (`LIMIT`); a run starts no
+  new unit above $60 (`STOP_SPEND`). Calls in DeepSeek peak hours need
   `--peak`.
 
 `corpus` first copies every assistant reply of the live transcripts
@@ -156,7 +161,11 @@ normalization removes the backticks from the model input.
   and keeps the local attention window inside a unit.
 - The layout of apple/ml-ane-transformers: (B, C, 1, S) tensors, 1x1
   convolutions, layer norm over channels.
-- fp16 activations, int8 weights, int4 embeddings.
+- fp16 activations. Weights per model (`ane.WEIGHTS`, recorded in
+  `settings.json`): the question tagger int8 per channel, embeddings
+  included; the option tagger fp16, because int8 per channel lost .057
+  option F1 against PyTorch and int8 per block put 62 convolutions on
+  the CPU.
 - Compute units `.cpuAndNeuralEngine`. There is no CPU or GPU fallback.
 - `settings.json` holds the tag names per task, the pad id, the token
   limit, the decoder constants and the digests of the checkpoint, the

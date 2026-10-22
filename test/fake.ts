@@ -43,7 +43,7 @@ export default function (pi: ExtensionAPI) {
       if (text === "ask") return reply(model, QUESTION, "stop");
       if (text === "open") return reply(model, "Before I start.\n\nWhat should the new service be called?", "stop");
       if (text === "one") return reply(model, ONE, "stop");
-      if (text === "single") return reply(model, "Should the fix go to the website, or is it too risky?", "stop");
+      if (text === "single") return reply(model, "Should the fix go to the website, or do you have another plan in mind?", "stop");
       if (text === "list") return reply(model, LIST, "stop");
       if (text === "abort") return reply(model, QUESTION.replace("Trailing note.", "Cut off"), "aborted");
       return reply(model, `Got: ${text}`, "stop");

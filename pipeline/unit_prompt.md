@@ -55,6 +55,26 @@ Answer: {"questions": [{"question": "Next I'll delete the three stale branches o
 Text: I propose to pin the dependency to 2.3 until upstream fixes the leak. Happy to go another way if you prefer.
 Answer: {"questions": [{"question": "I propose to pin the dependency to 2.3 until upstream fixes the leak. Happy to go another way if you prefer.", "kind": "yes_no", "options": []}]}
 
+An offer to do something for the user, if the user wants it, is a "yes_no" question, also without a question mark: "I can X if you want", "Say if you'd like Y", "Tell me if you want me to Z", "If you want X, I can Y". The question is only the sentence that makes the offer; the sentences before and after it are not part of it. "I can", "I could" or "if you want" in a report is not an offer.
+Text: The old branch is still on origin. Say if you'd like it deleted. Main is up to date.
+Answer: {"questions": [{"question": "Say if you'd like it deleted.", "kind": "yes_no", "options": []}]}
+Text: I could not reproduce the flake. If you want, I can run the suite ten more times and record the seed. Each run takes a minute.
+Answer: {"questions": [{"question": "If you want, I can run the suite ten more times and record the seed.", "kind": "yes_no", "options": []}]}
+Text: The setting is only needed if you want logged readings. The meter works without it.
+Answer: {"questions": []}
+
+A list of findings, issues, notes or caveats is not a question, also when a finding names a fix. Only a request inside it is a question: an offer, a choice between options, or a decision that waits for the user. The question is only that request. Decisions that the agent already made and lists for review are not questions.
+Text: Review findings: - The cache key ignores the locale. The fix is to add it to the key. - Two tests check the same path.
+Answer: {"questions": []}
+Text: Open issue: - The worker keeps the chat in memory, so page writes are lost. - Your options: make the API read-only, or reload the chat after each write. Tell me which one you want.
+Answer: {"questions": [{"question": "Your options: make the API read-only, or reload the chat after each write. Tell me which one you want.", "kind": "choice", "options": ["make the API read-only", "reload the chat after each write"]}]}
+
+A next step is a "yes_no" question only when it waits for a signal from the user: "I'll push when you tell me to", "I'll update the RFC once you pick one", "I'll wait for your go-ahead", "the change is ready for your commit decision". The question is only that sentence. These are not questions: a step that the agent takes on its own, a plan that does not ask for a go-ahead, the candidates that another agent will propose later, and a report of what comes next.
+Text: The build is green. I'll merge the branch when you tell me to.
+Answer: {"questions": [{"question": "I'll merge the branch when you tell me to.", "kind": "yes_no", "options": []}]}
+Text: Next I'll read the logs, then write the fix. After that the reviewer runs the tests.
+Answer: {"questions": []}
+
 A list under a lead-in that announces decisions, open questions or things that wait for the user ("Open questions:", "Decisions:", "Still open:", "Waiting on you:", "Two things for you:") has one question for each item that waits for the user, also without a question mark. The question is the whole item, from its marker to its last character, with its nested items. An item that states one recommendation, plan or go-ahead is "yes_no". An item that names alternatives is "choice", and the alternatives are its options. An item that asks for a fact or a name is "open". An item that does not wait for the user is no question: a status (running, in flight, done), a wait for someone else, a finding, a decision already made, a step the agent takes next. When the items are the alternatives of one decision ("Two options:"), or the parts of one batch that one go-ahead covers, the list is one question from the lead-in to the last item. A list that reports finished work, with a lead-in that names decisions, has no question.
 Text: Open questions, with my recommendations: 1. The empty reply: count it as the report, with a notice. I agree with the plan. 2. Which text: the last assistant message only, as the other tool does. 3. The demo: send it to the team that owns the site after this lands.
 Answer: {"questions": [{"question": "1. The empty reply: count it as the report, with a notice. I agree with the plan.", "kind": "yes_no", "options": []}, {"question": "2. Which text: the last assistant message only, as the other tool does.", "kind": "yes_no", "options": []}, {"question": "3. The demo: send it to the team that owns the site after this lands.", "kind": "yes_no", "options": []}]}

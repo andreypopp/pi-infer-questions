@@ -32,8 +32,8 @@ PRICES = {  # per 1M tokens, (off-peak, peak): https://api-docs.deepseek.com/qui
 MAX_OUTPUT = 8000
 PEAK_HOURS = ((1, 4), (6, 10))
 PEAK_MARGIN = timedelta(minutes=15)
-LIMIT = 50.0
-STOP_SPEND = 47.0  # a run starts no new unit above this total
+LIMIT = 65.0
+STOP_SPEND = 60.0  # a run starts no new unit above this total
 MAX_ATTEMPTS = 5
 NOT_BILLED = {429, 500, 502, 503}
 
