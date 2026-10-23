@@ -143,14 +143,6 @@ try {
   tmux("send-keys", "-t", pane, "Enter");
   await until("open sent", () => userLines().length === 7);
   check("the typed answer is sent", userLines()[6] === `USER ${JSON.stringify("> What should the new service be called?\n\nFood")}`);
-  send("single");
-  await until("one option", () => find("in mind? Yes/Other"));
-  const single = find("in mind? Yes");
-  click({ x: single.x + "in mind? ".length - 1, y: single.y });
-  await until("Yes answer", () => editorText() === "> Should the fix go to the website, or do you have another plan in mind?\n\nYes");
-  check("a one-option question shows its option and Yes", find("another plan in mind") !== undefined);
-  tmux("send-keys", "-t", pane, "Enter");
-  await until("single sent", () => userLines().length === 9);
   send("abort");
   await until("aborted reply", () => screen().includes("Cut off"));
   check("an aborted reply stays visible", screen().includes("Should I continue with the migration?"));

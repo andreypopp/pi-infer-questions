@@ -72,3 +72,59 @@ func spans(in text: Scalars, offsets: [Range<Int>], tags: [Int], _ decoding: Dec
 func afterContext(_ spans: [(span: Range<Int>, kind: Int)], _ context: Int) -> [(span: Range<Int>, kind: Int)] {
     spans.filter { $0.span.upperBound > context }.map { (max($0.span.lowerBound, context)..<$0.span.upperBound, $0.kind) }
 }
+
+private let sentenceEnd = Set(".?!".unicodeScalars)
+private let sentenceClosers = Set("\"'”’)]`".unicodeScalars)
+private let abbreviations = ["e.g.", "i.e.", "etc.", "vs.", "cf."].map { Array($0.unicodeScalars) }
+
+private func sentenceEnd(_ text: Scalars, from start: Int, limit: Int) -> Int {
+    var i = start
+    while i < limit {
+        guard sentenceEnd.contains(text[i]) else {
+            i += 1
+            continue
+        }
+        while i < limit, sentenceEnd.contains(text[i]) { i += 1 }
+        while i < limit, sentenceClosers.contains(text[i]) { i += 1 }
+        let abbreviated = abbreviations.contains { word in
+            i >= word.count && zip(text[(i - word.count)..<i], word).allSatisfy { $0.properties.lowercaseMapping.unicodeScalars.elementsEqual([$1]) }
+        }
+        if (i == limit || isSpace(text[i])) && !abbreviated { return i }
+    }
+    return limit
+}
+
+func completeSentences(_ text: Scalars, _ spans: [(span: Range<Int>, kind: Int)]) -> [(span: Range<Int>, kind: Int)] {
+    spans.enumerated().map { number, item in
+        let (a, b) = (item.span.lowerBound, item.span.upperBound)
+        var limit = text[b...].firstIndex(of: "\n") ?? text.count
+        if number + 1 < spans.count { limit = min(limit, spans[number + 1].span.lowerBound) }
+        var i = b
+        while i > 0, sentenceClosers.contains(text[i - 1]) { i -= 1 }
+        let closed = i > 0 && (sentenceEnd.contains(text[i - 1]) || text[i - 1] == ":" || text[i - 1] == ";")
+        if !text[b..<limit].contains(where: { !isSpace($0) })
+            || closed && (b == text.count || isSpace(text[b]) || sentenceClosers.contains(text[b])) {
+            return item
+        }
+        var cut: Int?
+        for mark in a..<b where text[mark] == "?" {
+            var j = mark + 1
+            while j < b, sentenceClosers.contains(text[j]) { j += 1 }
+            if j < b, isSpace(text[j]) { cut = j }
+        }
+        if let cut { return (a..<cut, item.kind) }
+        var end = sentenceEnd(text, from: b, limit: limit)
+        while end > b {
+            if isSpace(text[end - 1]) || text[end - 1] == "," {
+                end -= 1
+                continue
+            }
+            let word = ["and", "or"].map { Array($0.unicodeScalars) }.first {
+                end - $0.count > a && text[(end - $0.count)..<end].elementsEqual($0) && isSpace(text[end - $0.count - 1])
+            }
+            guard let word else { break }
+            end -= word.count
+        }
+        return (a..<end, item.kind)
+    }
+}

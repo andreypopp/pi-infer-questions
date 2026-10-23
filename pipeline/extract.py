@@ -8,15 +8,28 @@ from pathlib import Path
 from corpus import has_letters
 from model import CHECKPOINT, load, load_tokenizer, torch_taggers
 from normalise import normalise
-from tagging import KINDS, MAX_TOKENS, OPTION_TRAILING, after_context, message_range, token_count
+from tagging import (
+    KINDS,
+    MAX_TOKENS,
+    OPTION_TRAILING,
+    after_context,
+    complete_sentences,
+    message_range,
+    token_count,
+)
 from units import category, units
 
 
 def ask(taggers: dict, texts: list[str], contexts: list[int]) -> list[list[tuple]]:
     """(span, kind) of each question with a letter in each text, after the first `context`
-    characters."""
+    characters, completed to the end of its sentence."""
     return [
-        [((a, b), KINDS[k]) for a, b, k in after_context(found, context) if has_letters(text[a:b])]
+        [
+            ((a, b), KINDS[k])
+            for a, b, k in complete_sentences(
+                text, [s for s in after_context(found, context) if has_letters(text[s[0] : s[1]])]
+            )
+        ]
         for text, found, context in zip(texts, taggers["question"](texts), contexts, strict=True)
     ]
 

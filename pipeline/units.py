@@ -12,11 +12,15 @@ DECISION = re.compile(
     r"\b(?:which|prefer|choose|choice|options?|alternatively|either|decide|decisions?|pick|"
     r"would you like|do you want|let me know|your call|up to you|should i|shall i|"
     r"want me to|confirm|approve|go ahead|proceed|recommend\w*|tell me|"
-    r"you(?:['’]d)? (?:want|like|prefer|agree)|you['’]d rather|rather|unless you|"
-    r"say (?:the word|if|when|so)|whether|waiting (?:on|for) you|go-ahead|ways? (?:to|out)|"
+    r"you(?:['’]d)? (?:want|like|wish|prefer|agree)|you['’]d rather|rather|unless you|"
+    r"say (?:the word|if|when|so)|whether|waiting (?:on|for) your?|go-ahead|ways? (?:to|out)|"
     r"two ways|the question is|suggest\w*|propos\w*|objections?|if you object|sign[- ]off|"
     r"green light|happy to|questions?|still open|open (?:questions?|points?|items?|asks?)|"
-    r"what['’]s open|for you|pending)\b",
+    r"what['’]s open|for you|pending|"
+    r"(?:until|once|after|before|when) you(?:['’]ve|r)|"
+    r"your (?:go|ok|yes|look|answer|review|approval|word)|say [\"'“]\w+|"
+    r"если хотите|you(?:['’]ve)? (?:asked|answer|reviewed|checked|tried|confirm|approve)|"
+    r"(?:i['’]m|i am) waiting|wait for your|i['’]d (?:treat|suggest|go|do|keep|use|pick))\b",
     re.I,
 )
 

@@ -58,10 +58,15 @@ it to the lined text through the n-th non-space character.
 ## The gate
 
 Only a unit with `?` or a decision word (`units.DECISION`: "should I",
-"let me know", "recommend", "unless you", "propose", ...) goes to the
-model. The others get no model call, in every phase. The gate decides
-cost and the false-positive rate. It misses requests that have neither
-a `?` nor a decision word.
+"let me know", "recommend", "unless you", "propose", "waiting on your",
+"once you've", "your go", `say "..."`, ...) goes to the model. The
+others get no model call, in every phase. The gate decides cost and the
+false-positive rate. It misses requests that have neither a `?` nor a
+decision word. A three-sample label audit of 1,500 skipped units found
+a question in 1.3% of them after removing the labeller's "Let's ..."
+false positives, about 10% of all questions; most were next steps that
+wait for the user. The cues that caught them are in the pattern. "Let's"
+and "Let me" are not: they are almost always the agent's own steps.
 
 ## Labels
 
@@ -145,6 +150,15 @@ the selected model once on the held-out split.
 - Drop a span that is empty or holds only trailing characters.
 - Drop a question span without a letter (a lone list marker such as
   `2.`).
+- Complete a question span that ends inside a sentence
+  (`tagging.complete_sentences`, `completeSentences`): extend its end to
+  the sentence end, but not past the line end, the next question span or
+  a `?`. A dot inside a number or a path and `e.g.`, `i.e.`, `etc.`,
+  `vs.`, `cf.` do not end a sentence. A span that holds a `?` followed
+  by more words is cut after its last `?`. Then cut a trailing comma
+  and a trailing `and` or `or`. On dev this raised exact question F1
+  from .664 to .702 and proposal recall from .46 to .51; overlap F1 and
+  the false-positive rate did not change.
 
 Ranges in the result are Unicode code-point offsets into the original
 Markdown. After the mapping, a range grows over every code span of the
@@ -235,12 +249,13 @@ uses two hooks that it has:
 
 ## Known limits
 
-- Proposals and decision lists without `?` are the weakest case (52%
-  of proposals and 66% of decision-list items found on eval). Most
+- Proposals and decision lists without `?` are the weakest case (55%
+  of proposals and 59% of decision-list items found on eval). Most
   misses are whole lists that get no question; about half of the dev
   misses have arguable gold (findings lists, offers).
-- About 4% of gated units without a question get one, mostly proposals
-  and offers.
+- About 3.5% of gated units without a question get one, mostly
+  proposals, offers and the agent's own next steps ("Let's check
+  ...").
 - A run of `I` tags without a `B` is dropped by the strict decoder; the
   shipped seed loses one question this way in a test message where the
   other seeds find it.

@@ -27,9 +27,20 @@ different sections are not comparable.
 - **Typed tags against a kind heuristic.** A rule that guessed the kind
   from the first word failed on list items ("2. **Label:** What ...").
   With the kind in the tags, kind accuracy rose from .87 to .97.
-- **Ettin 68M.** One seed against three 32M seeds on the same dev:
-  proposal recall .54 against about .45, false positives 3.2%. Not
-  finished; 32M stays for now.
+- **Ettin 68M.** Three seeds of each size on the same labels (the wider
+  gate), dev, mean: question F1 .690 against .660, proposal recall .553
+  against .492, option F1 .674 against .578, false positives 2.2%
+  against 1.9%. 68M is better, but twice the size and latency; 32M
+  stays.
+- **Seed spread.** Three 32M seeds on the same data differ by up to
+  .055 in question F1 and .10 in option F1 on dev. The best of three
+  is .03 above the mean, so a dev difference below about .03 is noise.
+  A run on more data first looked worse than the shipped seed; the
+  means of both runs were equal, and on eval the new run was ahead.
+- **Sentence completion, plain and with guards.** Extending a span to
+  its sentence end raised exact question F1 on dev from .664 to .692;
+  stopping at a `?` and cutting a trailing `, and` raised it to .702
+  with no unit worse than the plain rule. It is in the decoder.
 - **The whole message as labeller context, and DeepSeek V4 Pro as a
   judge.** On 300 dev units, the whole message raised units without a
   two-of-three vote from 2.3% to 7.0% (decision lists 5% to 25%) and

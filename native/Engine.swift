@@ -65,7 +65,8 @@ final class Engine {
         let (tagged, questionTrace) = try tag("question", gated.map { all[$0].text }, trailing: [])
         let widen = widening(markdown)
         var found = zip(gated, tagged).flatMap { unit, spans in
-            afterContext(spans, all[unit].context).filter { all[unit].text[$0.span].contains(where: isLetter) }.map {
+            let lettered = afterContext(spans, all[unit].context).filter { all[unit].text[$0.span].contains(where: isLetter) }
+            return completeSentences(all[unit].text, lettered).map {
                 Found(unit: unit, span: $0.span, range: widen(all[unit].origin, $0.span), kind: kinds[$0.kind])
             }
         }

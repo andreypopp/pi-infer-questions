@@ -14,6 +14,9 @@ TAG_NAMES = {
 IGNORE = -100
 MAX_TOKENS = 512
 OPTION_TRAILING = ",.?;:"
+SENTENCE_END = ".?!"
+SENTENCE_CLOSERS = "\"'”’)]`"
+ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.")
 CODE_SPAN = re.compile(r"(`+)[^`\n]+?\1")
 CLOSING = {")": "(", "]": "[", "”": "“", '"': '"', "'": "'"}
 OPENING = {"(": ")", "[": "]", "“": "”", '"': '"', "'": "'"}
@@ -149,6 +152,76 @@ def after_context(spans: list[Typed], context: int) -> list[Typed]:
     """The spans without the first `context` characters of the text: a span that ends there is
     dropped, one that starts there starts after it."""
     return [(max(a, context), b, k) for a, b, k in spans if b > context]
+
+
+def sentence_end(text: str, start: int, limit: int) -> int:
+    """The end of the first sentence that ends after `start`, or `limit`. A full stop inside a
+    number, a path or an abbreviation does not end a sentence."""
+    i = start
+    while i < limit:
+        if text[i] in SENTENCE_END:
+            while i < limit and text[i] in SENTENCE_END:
+                i += 1
+            while i < limit and text[i] in SENTENCE_CLOSERS:
+                i += 1
+            if (i == limit or text[i].isspace()) and not text[:i].lower().endswith(ABBREVIATIONS):
+                return i
+        else:
+            i += 1
+    return limit
+
+
+def complete_sentences(text: str, spans: list[Typed]) -> list[Typed]:
+    """A span that ends inside a sentence: if it holds a question mark that a word follows, it ends
+    after the last such mark; else it extends to the end of the sentence, to the end of its line or
+    to the start of the next span, without a trailing comma, "and" or "or"."""
+    out = []
+    for n, (a, b, kind) in enumerate(spans):
+        line = text.find("\n", b)
+        limit = len(text) if line < 0 else line
+        if n + 1 < len(spans):
+            limit = min(limit, spans[n + 1][0])
+        i = b
+        while i > 0 and text[i - 1] in SENTENCE_CLOSERS:
+            i -= 1
+        closed = i > 0 and text[i - 1] in SENTENCE_END + ":;"
+        if (
+            not text[b:limit].strip()
+            or closed
+            and (b == len(text) or text[b].isspace() or text[b] in SENTENCE_CLOSERS)
+        ):
+            out.append((a, b, kind))
+            continue
+        cuts = []
+        for mark in (i for i in range(a, b) if text[i] == "?"):
+            j = mark + 1
+            while j < b and text[j] in SENTENCE_CLOSERS:
+                j += 1
+            if j < b and text[j].isspace():
+                cuts.append(j)
+        if cuts:
+            out.append((a, cuts[-1], kind))
+            continue
+        end = sentence_end(text, b, limit)
+        while end > b:
+            if text[end - 1].isspace() or text[end - 1] == ",":
+                end -= 1
+                continue
+            word = next(
+                (
+                    w
+                    for w in ("and", "or")
+                    if text[a:end].endswith(w)
+                    and end - len(w) > a
+                    and text[end - len(w) - 1].isspace()
+                ),
+                "",
+            )
+            if not word:
+                break
+            end -= len(word)
+        out.append((a, end, kind))
+    return out
 
 
 def project(tokenizer, text: str, spans: list[Span], trailing: str = "") -> list[Span]:
