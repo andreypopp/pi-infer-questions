@@ -79,19 +79,20 @@ A reply takes a few milliseconds. See [docs/design.md](docs/design.md).
 
 ## Quality
 
-One held-out evaluation of the shipped model on 3,074 units from real
+One held-out evaluation of the shipped model on 3,060 units from real
 coding-agent replies (PyTorch model; the Neural Engine and ONNX models
-are within .02 on every metric):
+are within .02 on every metric). The model marks whole sentences, so the
+gold spans are snapped to whole sentences too:
 
 | | |
 |---|---|
-| Questions found, with `?` (exact span) | 85% |
-| Questions found, overlapping span | 78% |
-| Proposals without `?` found | 55% |
-| Question F1, exact span / overlapping span | .681 / .802 |
-| Kind accuracy | .966 |
-| Option F1, end to end / with the correct question | .543 / .826 |
-| Units without a question that get one (false positives) | 3.5% |
+| Questions found, with `?` (exact span) | 87% |
+| Questions found, overlapping span | 83% |
+| Proposals without `?` found | 67% |
+| Question F1, exact span / overlapping span | .741 / .828 |
+| Kind accuracy | .963 |
+| Option F1, end to end | .579 |
+| Units without a question that get one (false positives) | 3.3% |
 
 It misses most often a proposal without `?` and an item of a list of
 decisions without `?`. Units that contain neither `?` nor a decision

@@ -7,6 +7,24 @@ A question needs an answer from the user. List the questions in text order; they
 If the unit has no question, return {"questions": []}.
 Rules, each with an example:
 
+A question is the sentence that asks or waits for the user: the sentence with "?", "Say the word ...", "Want me to ...", "Should I ...", or the sentence that makes the offer or the recommendation. Explanations, reasons, examples, details and consequences before or after that sentence are not part of the question.
+Text: Should I push it now? The tests pass, and the branch is two commits ahead of main.
+Answer: {"questions": [{"question": "Should I push it now?", "kind": "yes_no", "options": []}]}
+
+Add a sentence before the question only when the question cannot be understood without it. A question that stands alone has no sentence before it.
+Text: Both options need new fixtures, which I would write after the cleanup. Want me to?
+Answer: {"questions": [{"question": "Both options need new fixtures, which I would write after the cleanup. Want me to?", "kind": "yes_no", "options": []}]}
+
+A recommendation with reasons is one question: the sentence with the recommendation. The sentences with the reasons are not part of it.
+Text: I recommend pinning the dependency to 2.3. The newer version leaks memory. The fix is not released yet. Pinning costs nothing now.
+Answer: {"questions": [{"question": "I recommend pinning the dependency to 2.3.", "kind": "yes_no", "options": []}]}
+
+A sentence that waits for the user and names its action is the whole question, also when sentences with details come before it.
+Text: I would make the change now. It touches two files and no tests. Say the word and I'll push the branch.
+Answer: {"questions": [{"question": "Say the word and I'll push the branch.", "kind": "yes_no", "options": []}]}
+
+The rules below say which sentences belong to a question of a special form (a choice, a proposal, a decision list). A choice keeps its alternatives, and a decision-list item is the whole item, as they say.
+
 Several questions in one unit are several questions.
 Text: Should I push it now, or wait for CI? Also, do you want the docs updated too?
 Answer: {"questions": [{"question": "Should I push it now, or wait for CI?", "kind": "choice", "options": ["push it now", "wait for CI"]}, {"question": "Also, do you want the docs updated too?", "kind": "yes_no", "options": []}]}
@@ -43,7 +61,7 @@ A yes/no question has no options. Words like "y/n" or "yes or no" are not option
 Text: Should I run the tests now? Reply y/n.
 Answer: {"questions": [{"question": "Should I run the tests now?", "kind": "yes_no", "options": []}]}
 
-A proposal that waits for the user's approval is a "yes_no" question, also without a question mark. It is the sentences that state the proposed action and ask for approval, in any wording: a recommendation, a suggestion, a plan, a next step that waits for a go-ahead, or an action that happens unless the user objects. A heading or label before them is not part of it. Text that does not wait for the user is not a question: a choice already made, an action already done or started, general advice, a report.
+A proposal that waits for the user's approval is a "yes_no" question, also without a question mark. It is the sentence that states the proposed action and asks for approval, or two sentences when the one that asks does not say the action ("Say the word and I'll do it") and so needs the one that states it; a span has no gap, so a sentence between them stays inside. The wording is free: it can be a recommendation, a suggestion, a plan, a next step that waits for a go-ahead, or an action that happens unless the user objects. A heading or label before them is not part of it. Text that does not wait for the user is not a question: a choice already made, an action already done or started, general advice, a report.
 Text: The cache is stale. I recommend we drop it and rebuild it. Say the word and I'll do it.
 Answer: {"questions": [{"question": "I recommend we drop it and rebuild it. Say the word and I'll do it.", "kind": "yes_no", "options": []}]}
 Text: 1. Archive branch. My suggestion: commit the app changes to a separate branch. This needs git writes, so I wait for your go-ahead.

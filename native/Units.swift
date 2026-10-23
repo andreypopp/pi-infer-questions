@@ -6,7 +6,7 @@ struct Unit {
     let context: Int
 }
 
-private let item = regex(#"\s*(?:[-*+•]|\d+[.)]|[A-Za-z][.)])\s"#)
+let item = regex(#"\s*(?:[-*+•]|\d+[.)]|[A-Za-z][.)])\s"#)
 private let closers: Set<Unicode.Scalar> = [")", "]", "\"", "'", "”"]
 
 private func itemFlags(_ mapped: Mapped, _ bounds: [Range<Int>]) -> [Bool] {

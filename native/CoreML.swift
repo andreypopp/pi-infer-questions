@@ -20,6 +20,7 @@ struct Models {
     private let models: [String: MLModel]
     private let padTokenId: Int
     private let length: Int
+    private let classes: [String: Int]
     private let lock = NSLock()
 
     init(directory: URL, settings: Settings) throws {
@@ -30,10 +31,11 @@ struct Models {
         })
         padTokenId = settings.padTokenId
         length = settings.maxTokens
+        classes = settings.tags.mapValues(\.count)
     }
 
-    func tags(_ task: String, _ ids: [[Int]]) throws -> (tags: [[Int]], packs: [[Int]]) {
-        var out = [[Int]](repeating: [], count: ids.count)
+    func logits(_ task: String, _ ids: [[Int]]) throws -> (logits: [[Float]], packs: [[Int]]) {
+        var out = [[Float]](repeating: [], count: ids.count)
         let packs = packGreedy(ids.map(\.count), limit: length)
         for row in packs {
             let inputIds = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
@@ -58,15 +60,16 @@ struct Models {
                 placed.append((unit, offset))
                 offset += ids[unit].count
             }
-            let best = try predict(task, inputIds, positions, segments, used: offset)
+            let classes = self.classes[task]!
+            let scores = try predict(task, inputIds, positions, segments, used: offset)
             for (unit, start) in placed {
-                out[unit] = Array(best[start..<(start + ids[unit].count)])
+                out[unit] = Array(scores[(start * classes)..<((start + ids[unit].count) * classes)])
             }
         }
         return (out, packs)
     }
 
-    private func predict(_ task: String, _ ids: MLMultiArray, _ positions: MLMultiArray, _ segments: MLMultiArray, used: Int) throws -> [Int] {
+    private func predict(_ task: String, _ ids: MLMultiArray, _ positions: MLMultiArray, _ segments: MLMultiArray, used: Int) throws -> [Float] {
         lock.lock()
         defer { lock.unlock() }
         let result = try models[task]!.prediction(from: MLDictionaryFeatureProvider(dictionary: [
@@ -77,7 +80,7 @@ struct Models {
         guard let logits = result.featureValue(for: "logits")?.multiArrayValue, logits.shape.count == 4 else {
             throw CocoaError(.coderReadCorrupt)
         }
-        let classes = logits.shape[1].intValue
+        guard let classes = self.classes[task], logits.shape[1].intValue == classes else { throw CocoaError(.coderReadCorrupt) }
         let strides = logits.strides.map(\.intValue)
         let half = logits.dataType == .float16
         let pointer = logits.dataPointer
@@ -85,7 +88,7 @@ struct Models {
             let index = tag * strides[1] + position * strides[3]
             return half ? Float(pointer.load(fromByteOffset: index * 2, as: Float16.self)) : pointer.load(fromByteOffset: index * 4, as: Float.self)
         }
-        return (0..<used).map { position in (0..<classes).max { value($0, position) < value($1, position) } ?? 0 }
+        return (0..<used).flatMap { position in (0..<classes).map { value($0, position) } }
     }
 }
 #endif

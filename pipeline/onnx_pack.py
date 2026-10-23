@@ -117,15 +117,15 @@ def batches(lengths: list[int]) -> list[list[int]]:
     return found
 
 
-def predict(model, pad: int, ids: list[list[int]]) -> list[list[int]]:
-    """The tags of the units, which are the rows of one batch."""
+def predict(model, pad: int, ids: list[list[int]]) -> list[list[list[float]]]:
+    """The logits of the tokens of the units, which are the rows of one batch."""
     width = max(map(len, ids))
     tokens = np.full((len(ids), width), pad, dtype=np.int64)
     mask = np.zeros((len(ids), width), dtype=np.int64)
     for r, unit in enumerate(ids):
         tokens[r, : len(unit)], mask[r, : len(unit)] = unit, 1
-    tags = model.run(["logits"], dict(zip(INPUTS, (tokens, mask), strict=True)))[0].argmax(-1)
-    return [tags[r, : len(unit)].tolist() for r, unit in enumerate(ids)]
+    logits = model.run(["logits"], dict(zip(INPUTS, (tokens, mask), strict=True)))[0]
+    return [logits[r, : len(unit)].tolist() for r, unit in enumerate(ids)]
 
 
 def load_runtime(directory: Path, checkpoint: Path, threads: int = 0) -> Runtime:

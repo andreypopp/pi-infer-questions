@@ -66,7 +66,7 @@ final class Engine {
         let widen = widening(markdown)
         var found = zip(gated, tagged).flatMap { unit, spans in
             let lettered = afterContext(spans, all[unit].context).filter { all[unit].text[$0.span].contains(where: isLetter) }
-            return completeSentences(all[unit].text, lettered).map {
+            return lettered.map {
                 Found(unit: unit, span: $0.span, range: widen(all[unit].origin, $0.span), kind: kinds[$0.kind])
             }
         }
@@ -84,8 +84,17 @@ final class Engine {
 
     private func tag(_ task: String, _ texts: [Scalars], trailing: Set<Unicode.Scalar>) throws -> ([[(span: Range<Int>, kind: Int)]], Trace) {
         let encoded = texts.map { tokenizer.encode($0) }
-        let (tags, packs) = try models.tags(task, encoded.map(\.ids))
-        let out = texts.indices.map { spans(in: texts[$0], offsets: encoded[$0].offsets, tags: tags[$0], decoding, trailing: trailing) }
+        let (logits, packs) = try models.logits(task, encoded.map(\.ids))
+        let classes = tagNames[task]!.count
+        let out = texts.indices.map { number -> [(span: Range<Int>, kind: Int)] in
+            let offsets = encoded[number].offsets
+            if task == "question" { return sentenceSpans(in: texts[number], offsets: offsets, logits: logits[number], classes: classes) }
+            let tags = offsets.indices.map { token -> Int in
+                let row = logits[number][(token * classes)..<((token + 1) * classes)]
+                return row.indices.max { row[$0] < row[$1] }! - row.startIndex
+            }
+            return spans(in: texts[number], offsets: offsets, tags: tags, decoding, trailing: trailing)
+        }
         return (out, Trace(tokens: encoded, packs: packs))
     }
 }

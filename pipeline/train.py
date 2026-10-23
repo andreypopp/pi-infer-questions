@@ -14,7 +14,7 @@ import torch
 from transformers import get_linear_schedule_with_warmup
 
 from corpus import load_units
-from evaluate import evaluate, held_of
+from evaluate import evaluate, gold_for, held_of
 from label import LABELS, gold_of, load_labelled, load_prompt
 from model import (
     CHECKPOINT,
@@ -76,12 +76,13 @@ def fit(tokenizer, task: str, encoded: list, seed: int, epochs: int):
 
 
 def examples(tokenizer, records: list[dict]) -> dict[str, list]:
-    """The question tagger reads each unit and tags the questions with their kinds; the option
-    tagger reads each choice."""
+    """The question tagger reads each unit and tags the questions with their kinds, as whole
+    sentences; the option tagger reads each choice."""
     gold = [(r["lined"], gold_of(r)) for r in records]
+    asked = [(r["lined"], gold_for(r)) for r in records]
     return {
         "question": prepare(
-            tokenizer, [(t, [(a, b, KINDS.index(kind)) for (a, b), kind, _ in g]) for t, g in gold]
+            tokenizer, [(t, [(a, b, KINDS.index(kind)) for (a, b), kind, _ in g]) for t, g in asked]
         ),
         "option": prepare(
             tokenizer,

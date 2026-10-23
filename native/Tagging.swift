@@ -1,3 +1,5 @@
+import Foundation
+
 struct Decoding {
     let closing: [Unicode.Scalar: Unicode.Scalar]
     let opening: [Unicode.Scalar: Unicode.Scalar]
@@ -94,37 +96,87 @@ private func sentenceEnd(_ text: Scalars, from start: Int, limit: Int) -> Int {
     return limit
 }
 
-func completeSentences(_ text: Scalars, _ spans: [(span: Range<Int>, kind: Int)]) -> [(span: Range<Int>, kind: Int)] {
-    spans.enumerated().map { number, item in
-        let (a, b) = (item.span.lowerBound, item.span.upperBound)
-        var limit = text[b...].firstIndex(of: "\n") ?? text.count
-        if number + 1 < spans.count { limit = min(limit, spans[number + 1].span.lowerBound) }
-        var i = b
-        while i > 0, sentenceClosers.contains(text[i - 1]) { i -= 1 }
-        let closed = i > 0 && (sentenceEnd.contains(text[i - 1]) || text[i - 1] == ":" || text[i - 1] == ";")
-        if !text[b..<limit].contains(where: { !isSpace($0) })
-            || closed && (b == text.count || isSpace(text[b]) || sentenceClosers.contains(text[b])) {
-            return item
+private func sentences(_ text: Scalars) -> [Range<Int>] {
+    var found: [Range<Int>] = []
+    var lineStart = 0
+    while true {
+        let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.count
+        var i = lineStart
+        if let marker = Line(text[lineStart..<lineEnd]).starting(item) { i += Line(text[lineStart..<lineEnd]).scalars(marker.range).upperBound }
+        var start = lineStart
+        while i < lineEnd {
+            while i < lineEnd, isSpace(text[i]) { i += 1 }
+            if i >= lineEnd { break }
+            let stop = sentenceEnd(text, from: i, limit: lineEnd)
+            found.append((start == lineStart ? start : i)..<stop)
+            start = stop
+            i = stop
         }
-        var cut: Int?
-        for mark in a..<b where text[mark] == "?" {
-            var j = mark + 1
-            while j < b, sentenceClosers.contains(text[j]) { j += 1 }
-            if j < b, isSpace(text[j]) { cut = j }
-        }
-        if let cut { return (a..<cut, item.kind) }
-        var end = sentenceEnd(text, from: b, limit: limit)
-        while end > b {
-            if isSpace(text[end - 1]) || text[end - 1] == "," {
-                end -= 1
-                continue
-            }
-            let word = ["and", "or"].map { Array($0.unicodeScalars) }.first {
-                end - $0.count > a && text[(end - $0.count)..<end].elementsEqual($0) && isSpace(text[end - $0.count - 1])
-            }
-            guard let word else { break }
-            end -= word.count
-        }
-        return (a..<end, item.kind)
+        if lineEnd == text.count { break }
+        lineStart = lineEnd + 1
     }
+    return found.filter { text[$0].contains { !isSpace($0) } }
+}
+
+private func softmax(_ row: ArraySlice<Float>) -> [Double] {
+    let top = Double(row.max()!)
+    let exps = row.map { exp(Double($0) - top) }
+    var total = 0.0
+    for value in exps { total += value }
+    return exps.map { $0 / total }
+}
+
+private func largest(_ values: [Double]) -> Int {
+    var best = 0
+    for index in values.indices where values[index] > values[best] { best = index }
+    return best
+}
+
+private struct Candidate {
+    var start: Int
+    var end: Int
+    var inside: [Double]
+}
+
+/// A sentence is a question sentence when the mean probability of its tokens inside a kind is above
+/// that of O; it starts a question when its first token is likelier a B than an I, or when no
+/// question sentence is before it. The kind of a question is the likeliest over its sentences.
+func sentenceSpans(in text: Scalars, offsets: [Range<Int>], logits: [Float], classes: Int) -> [(span: Range<Int>, kind: Int)] {
+    let probabilities = offsets.indices.map { softmax(logits[($0 * classes)..<(($0 + 1) * classes)]) }
+    var found: [Candidate] = []
+    var open = false
+    for sentence in sentences(text) {
+        var rows: [[Double]] = []
+        for token in offsets.indices where offsets[token].lowerBound < offsets[token].upperBound && sentence.contains(offsets[token].lowerBound) {
+            rows.append(probabilities[token])
+        }
+        open = open && !rows.isEmpty
+        guard !rows.isEmpty else { continue }
+        var mean = [Double](repeating: 0, count: classes)
+        for row in rows { for column in 0..<classes { mean[column] += row[column] } }
+        for column in 0..<classes { mean[column] /= Double(rows.count) }
+        var inside: [Double] = []
+        for kind in 0..<(classes - 1) / 2 { inside.append(mean[1 + 2 * kind] + mean[2 + 2 * kind]) }
+        let kind = largest(inside)
+        guard mean[0] < inside[kind] else {
+            open = false
+            continue
+        }
+        let first = rows[0]
+        if open, first[2 * kind + 1] <= first[2 * kind + 2] {
+            found[found.count - 1].end = sentence.upperBound
+            for index in inside.indices { found[found.count - 1].inside[index] += inside[index] }
+        } else {
+            found.append(Candidate(start: sentence.lowerBound, end: sentence.upperBound, inside: inside))
+        }
+        open = true
+    }
+    var out: [(span: Range<Int>, kind: Int)] = []
+    for item in found {
+        var (start, end) = (item.start, item.end)
+        while start < end, isSpace(text[start]) { start += 1 }
+        while end > start, isSpace(text[end - 1]) { end -= 1 }
+        out.append((start..<end, largest(item.inside)))
+    }
+    return out
 }

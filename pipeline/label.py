@@ -19,7 +19,7 @@ from units import ITEM, category
 LABELS = DATA / "labels.jsonl"
 PROMPT = Path(__file__).parent / "unit_prompt.md"
 MIN_OPTION = 3
-WORKERS = 8
+WORKERS = 128
 
 
 @dataclass(frozen=True)

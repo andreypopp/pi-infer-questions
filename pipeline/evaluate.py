@@ -3,6 +3,7 @@ positives."""
 
 from extract import ask, attach_options
 from label import gold_of, lined_context
+from sentences import snap_gold
 from tagging import KINDS, MAX_TOKENS, OPTION_TRAILING, Span, project, token_count
 from units import ITEM, line_starts
 
@@ -33,8 +34,12 @@ def project_gold(
     return out
 
 
+def gold_for(record: dict) -> Unit:
+    return snap_gold(record["lined"], gold_of(record))
+
+
 def held_of(tokenizer, records: list[dict]) -> list:
-    return [project_gold(tokenizer, r["lined"], gold_of(r)) for r in records]
+    return [project_gold(tokenizer, r["lined"], gold_for(r)) for r in records]
 
 
 def changed(gold: Unit, held: list) -> int:
@@ -174,7 +179,7 @@ def evaluate(tokenizer, taggers: dict, records: list[dict], held: list) -> dict[
     part also has the false positive rates, the number of gold spans that the tokens change and
     the units over the token limit."""
     texts = [r["lined"] for r in records]
-    originals = [gold_of(r) for r in records]
+    originals = [gold_for(r) for r in records]
     gold = [[(q, kind, options) for _, q, kind, options in filter(None, unit)] for unit in held]
     pred = decode(taggers, texts, [lined_context(r) for r in records])
     inner = attach_options(taggers, texts, gold)

@@ -39,7 +39,7 @@ build-backend = "hatchling.build"
 only-include = [
   "ane.py", "ane_pack.py", "corpus.py", "deepseek.py", "evaluate.py", "extract.py", "jsonl.py",
   "label.py", "label_cli.py", "label_corpus.py", "model.py", "normalise.py", "onnx_pack.py", "pack.py", "redact.py",
-  "report.py", "synth.py", "tagging.py", "train.py", "transcripts.py", "units.py",
+  "report.py", "sentences.py", "synth.py", "tagging.py", "train.py", "transcripts.py", "units.py",
   "unit_prompt.md", "synth_prompt.md", "fixtures",
 ]
 

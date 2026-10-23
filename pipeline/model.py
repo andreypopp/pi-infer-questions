@@ -7,6 +7,7 @@ import torch
 from huggingface_hub import logging as hub_logging
 from transformers import AutoModelForTokenClassification, AutoTokenizer, logging
 
+import sentences
 from jsonl import DATA
 from tagging import TAG_NAMES, Span, Typed, encode, spans_of
 
@@ -94,7 +95,12 @@ def untyped(spans: list[Typed]) -> list[Span]:
 
 
 def predict(
-    tokenizer, model, typed: bool, texts: list[str], trailing: str = "", cpu: bool = False
+    tokenizer,
+    model,
+    typed: bool,
+    texts: list[str],
+    trailing: str = "",
+    cpu: bool = False,
 ) -> list[list[Typed]] | list[list[Span]]:
     """The tagged character spans of each text."""
     encoded = [encode(tokenizer, text) for text in texts]
@@ -108,9 +114,15 @@ def predict(
         batch = order[first : first + BATCH]
         with torch.no_grad():
             output = model(**batch_tensors(tokenizer, [encoded[i][0] for i in batch], hardware))
-        tags = output.logits.argmax(-1).cpu().tolist()
+        if typed:
+            scores = output.logits.cpu().tolist()
+        else:
+            tags = output.logits.argmax(-1).cpu().tolist()
         for row, i in enumerate(batch):
             ids, offsets = encoded[i]
-            found = spans_of(texts[i], offsets, tags[row][: len(ids)], trailing)
+            if typed:
+                found = sentences.decode(texts[i], offsets, scores[row][: len(ids)])
+            else:
+                found = spans_of(texts[i], offsets, tags[row][: len(ids)], trailing)
             out[i] = found if typed else untyped(found)
     return out

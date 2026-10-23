@@ -92,12 +92,14 @@ question. A wrong answer gets one correction turn.
   user is a `yes_no` question over the offer sentence only; a list of
   findings, issues or notes is no question, only a request inside it
   is; a next step is a `yes_no` question only when it waits for a
-  signal from the user.
+  signal from the user; a question in prose is the sentence that asks
+  or waits, with an earlier sentence only when the question cannot be
+  understood without it.
 - A label is valid only for the prompt digest it was made with. A
   prompt change relabels every unit, real and synthetic.
 - Spend: `data/ledger.jsonl` reserves the worst case before each call
-  and settles from the usage. The cap is $65 (`LIMIT`); a run starts no
-  new unit above $60 (`STOP_SPEND`). Calls in DeepSeek peak hours need
+  and settles from the usage. The cap is $75 (`LIMIT`); a run starts no
+  new unit above $72 (`STOP_SPEND`). Calls in DeepSeek peak hours need
   `--peak`.
 
 `corpus` first copies every assistant reply of the live transcripts
@@ -125,7 +127,8 @@ Two fine-tunes of `jhu-clsp/ettin-encoder-32m` (pinned revision), token
 taggers:
 
 - The question tagger: 7 tags, `O` and `B`/`I` for each kind. The kind
-  comes from the tags.
+  comes from the tags. It trains on gold spans snapped to whole
+  sentences (`sentences.snap_gold`).
 - The option tagger: 3 tags. It reads one choice question and runs only
   on choice spans.
 
@@ -137,28 +140,36 @@ the selected model once on the held-out split.
 
 ## Decoding
 
-`tagging.spans_of`, `Tagging.swift`:
+Questions are decoded per sentence (`sentences.decode`,
+`Tagging.sentenceSpans`). A sentence (`sentences.segments`) ends at a
+line end, or at `.`, `?` or `!` followed by a space; a dot inside a
+number or a path and `e.g.`, `i.e.`, `etc.`, `vs.`, `cf.` do not end
+it. A list item's marker is part of its first sentence.
 
-- A span starts at a `B` tag; `I` tags continue it; a change of kind
-  ends it. An `I` without a `B` starts nothing. (A lenient decoder that
-  joined runs of non-`O` tags scored worse on every dev metric.)
-- Trim unbalanced brackets and quotes at the edges; for options, cut
-  trailing `, . ? ; :`; trim again.
+- Average the softmax of each tag over the sentence's tokens. The
+  sentence is `O` when the mean `O` is at least the largest mean `B`+`I`
+  of a kind.
+- A question sentence right after another one continues its question
+  when its first token is not likelier a `B` than an `I` of its kind;
+  else it starts a question.
+- The kind of a question is the kind with the largest `B`+`I` mass,
+  summed over its sentences.
+- The sums run in token order in Python and Swift, so the two decode
+  identically.
+- Drop a question span without a letter (a lone list marker such as
+  `2.`).
+
+Options are decoded per token (`tagging.spans_of`):
+
+- A span starts at a `B` tag; `I` tags continue it. An `I` without a
+  `B` starts nothing. (A lenient decoder that joined runs of non-`O`
+  tags scored worse on every dev metric.)
+- Trim unbalanced brackets and quotes at the edges; cut trailing
+  `, . ? ; :`; trim again.
 - Balance backticks at the edges: extend the end to a near closing
   backtick, else the start over an opening one, else cut the edge one.
 - Extend the end over the combining marks that follow it.
 - Drop a span that is empty or holds only trailing characters.
-- Drop a question span without a letter (a lone list marker such as
-  `2.`).
-- Complete a question span that ends inside a sentence
-  (`tagging.complete_sentences`, `completeSentences`): extend its end to
-  the sentence end, but not past the line end, the next question span or
-  a `?`. A dot inside a number or a path and `e.g.`, `i.e.`, `etc.`,
-  `vs.`, `cf.` do not end a sentence. A span that holds a `?` followed
-  by more words is cut after its last `?`. Then cut a trailing comma
-  and a trailing `and` or `or`. On dev this raised exact question F1
-  from .664 to .702 and proposal recall from .46 to .51; overlap F1 and
-  the false-positive rate did not change.
 
 Ranges in the result are Unicode code-point offsets into the original
 Markdown. After the mapping, a range grows over every code span of the
@@ -175,11 +186,9 @@ normalization removes the backticks from the model input.
   and keeps the local attention window inside a unit.
 - The layout of apple/ml-ane-transformers: (B, C, 1, S) tensors, 1x1
   convolutions, layer norm over channels.
-- fp16 activations. Weights per model (`ane.WEIGHTS`, recorded in
-  `settings.json`): the question tagger int8 per channel, embeddings
-  included; the option tagger fp16, because int8 per channel lost .057
-  option F1 against PyTorch and int8 per block put 62 convolutions on
-  the CPU.
+- fp16 activations and fp16 weights in both models (62 MB each). int8
+  weights changed a few question kinds and lost up to .057 option F1
+  against PyTorch; int8 per block put convolutions on the CPU.
 - Compute units `.cpuAndNeuralEngine`. There is no CPU or GPU fallback.
 - `settings.json` holds the tag names per task, the pad id, the token
   limit, the decoder constants and the digests of the checkpoint, the

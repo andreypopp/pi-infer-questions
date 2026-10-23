@@ -36,8 +36,8 @@ def pack_greedy(lengths: list[int]) -> list[list[int]]:
     return packs
 
 
-def predict(model, pad: int, ids: list[list[int]]) -> list[list[int]]:
-    """The tags of the units, which share one sequence."""
+def predict(model, pad: int, ids: list[list[int]]) -> list[list[list[float]]]:
+    """The logits of the tokens of the units, which share one sequence."""
     tokens = np.full((1, MAX_TOKENS), pad, dtype=np.int32)
     position, segment = (np.zeros((1, MAX_TOKENS), dtype=np.int32) for _ in range(2))
     offset, placed = 0, []
@@ -50,7 +50,7 @@ def predict(model, pad: int, ids: list[list[int]]) -> list[list[int]]:
         offset += n
     inputs = dict(zip(INPUTS, (tokens, position, segment), strict=True))
     logits = np.asarray(model.predict(inputs)["logits"])[0, :, 0, :]
-    return [logits[:, start : start + n].argmax(0).tolist() for start, n in placed]
+    return [logits[:, start : start + n].T.tolist() for start, n in placed]
 
 
 def load_runtime(directory: Path, checkpoint: Path) -> Runtime:

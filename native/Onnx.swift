@@ -56,20 +56,21 @@ struct Models {
         self.limits = limits
     }
 
-    func tags(_ task: String, _ ids: [[Int]]) throws -> (tags: [[Int]], packs: [[Int]]) {
-        var out = [[Int]](repeating: [], count: ids.count)
+    func logits(_ task: String, _ ids: [[Int]]) throws -> (logits: [[Float]], packs: [[Int]]) {
+        var out = [[Float]](repeating: [], count: ids.count)
         let packs = batches(ids.map(\.count), limits)
         for row in packs {
             let width = row.map { ids[$0].count }.max() ?? 0
-            let tags = try run(task, row.map { ids[$0] }, width: width)
+            let scores = try run(task, row.map { ids[$0] }, width: width)
+            let classes = self.classes[task]!
             for (number, unit) in row.enumerated() {
-                out[unit] = Array(tags[number * width..<(number * width + ids[unit].count)])
+                out[unit] = Array(scores[(number * width * classes)..<((number * width + ids[unit].count) * classes)])
             }
         }
         return (out, packs)
     }
 
-    private func run(_ task: String, _ rows: [[Int]], width: Int) throws -> [Int] {
+    private func run(_ task: String, _ rows: [[Int]], width: Int) throws -> [Float] {
         let count = rows.count * width
         let tokens = UnsafeMutablePointer<Int64>.allocate(capacity: 2 * count)
         defer { tokens.deallocate() }
@@ -95,16 +96,12 @@ struct Models {
         defer { api.pointee.ReleaseTensorTypeAndShapeInfo(info) }
         var elements = 0
         try check(api, api.pointee.GetTensorShapeElementCount(info, &elements))
-        let classes = classes[task]!
+        let classes = self.classes[task]!
         guard elements == count * classes else { throw CocoaError(.coderReadCorrupt) }
         var raw: UnsafeMutableRawPointer?
         try check(api, api.pointee.GetTensorMutableData(output, &raw))
         let logits = raw!.assumingMemoryBound(to: Float.self)
-        return (0..<count).map { position in
-            var best = 0
-            for tag in 1..<classes where logits[position * classes + tag] > logits[position * classes + best] { best = tag }
-            return best
-        }
+        return Array(UnsafeBufferPointer(start: logits, count: count * classes))
     }
 }
 

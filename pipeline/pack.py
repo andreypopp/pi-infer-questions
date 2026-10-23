@@ -14,6 +14,7 @@ from pathlib import Path
 
 from transformers import AutoTokenizer
 
+import sentences
 from corpus import load_units
 from evaluate import decode, evaluate, held_of
 from extract import analyse, ask, option_texts
@@ -46,13 +47,13 @@ REPORTED = ("kind_f1_yes_no", "kind_f1_open", "kind_f1_choice")
 @dataclass(frozen=True)
 class Runtime:
     """The loaded pack: `group` splits the token counts of the texts into the units of one model
-    call, and `predict` gives the tags of the token ids of one group."""
+    call, and `predict` gives the logits of each token of the token ids of one group."""
 
     tokenizer: object
     settings: dict
     models: dict
     group: Callable[[list[int]], list[list[int]]]
-    predict: Callable[[object, int, list[list[int]]], list[list[int]]]
+    predict: Callable[[object, int, list[list[int]]], list[list[list[float]]]]
 
 
 def source_digest() -> str:
@@ -103,15 +104,18 @@ def open_runtime(
 
 
 def tag(runtime: Runtime, task: str, texts: list[str], trailing: str = ""):
-    """The spans of each text, typed for the question task."""
+    """The spans of each text, typed for the question task, which decodes sentences."""
     encoded = [encode(runtime.tokenizer, t) for t in texts]
     pad = runtime.settings["pad_token_id"]
     spans: list = [None] * len(texts)
     for members in runtime.group([len(ids) for ids, _ in encoded]):
-        tags = runtime.predict(runtime.models[task], pad, [encoded[i][0] for i in members])
-        for i, row in zip(members, tags, strict=True):
-            found = spans_of(texts[i], encoded[i][1], row, trailing)
-            spans[i] = found if task == "question" else untyped(found)
+        logits = runtime.predict(runtime.models[task], pad, [encoded[i][0] for i in members])
+        for i, row in zip(members, logits, strict=True):
+            if task == "question":
+                spans[i] = sentences.decode(texts[i], encoded[i][1], row)
+            else:
+                tags = [max(range(len(scores)), key=scores.__getitem__) for scores in row]
+                spans[i] = untyped(spans_of(texts[i], encoded[i][1], tags, trailing))
     return spans
 
 

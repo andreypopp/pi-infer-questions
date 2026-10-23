@@ -13,7 +13,6 @@ from tagging import (
     MAX_TOKENS,
     OPTION_TRAILING,
     after_context,
-    complete_sentences,
     message_range,
     token_count,
 )
@@ -22,14 +21,9 @@ from units import category, units
 
 def ask(taggers: dict, texts: list[str], contexts: list[int]) -> list[list[tuple]]:
     """(span, kind) of each question with a letter in each text, after the first `context`
-    characters, completed to the end of its sentence."""
+    characters."""
     return [
-        [
-            ((a, b), KINDS[k])
-            for a, b, k in complete_sentences(
-                text, [s for s in after_context(found, context) if has_letters(text[s[0] : s[1]])]
-            )
-        ]
+        [((a, b), KINDS[k]) for a, b, k in after_context(found, context) if has_letters(text[a:b])]
         for text, found, context in zip(texts, taggers["question"](texts), contexts, strict=True)
     ]
 

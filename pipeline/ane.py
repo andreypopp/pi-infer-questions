@@ -5,8 +5,7 @@ the inputs are input_ids, position_ids (restart at 0 for each unit) and segment_
 padding, 1 for the first unit, ...). The model builds the block-diagonal mask from the segments
 and keeps the local window inside a unit. The layout follows apple/ml-ane-transformers: (B, C, 1,
 S) tensors, 1x1 Conv2d for Linear, layer norm over the channel axis, one einsum attention per
-head. The activations are fp16; the weights of the question task are int8 per channel (the
-embedding table too) and those of the option task stay fp16. The logits are (1, tags, 1, 512): 7
+head. The activations and the weights are fp16. The logits are (1, tags, 1, 512): 7
 tags for the question task, 3 for the option task. The output directory is self-contained: the
 tokenizer files and settings.json hold what a reader needs, with the digests of the checkpoint,
 the packages and the source code.
@@ -34,19 +33,8 @@ logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLeve
 import coremltools as ct  # noqa: E402
 
 COREML_ANE = DATA / "coreml-ane-pack"
-WEIGHTS = {"question": "int8", "option": "float16"}
 MASKED = -10000.0
 INPUTS = ("input_ids", "position_ids", "segment_ids")
-
-
-def compress(model):
-    """The weights as int8 per channel. The packages need macOS 15, the deployment target."""
-    int8 = ct.optimize.coreml.OpLinearQuantizerConfig(
-        mode="linear_symmetric", dtype="int8", granularity="per_channel"
-    )
-    return ct.optimize.coreml.linear_quantize_weights(
-        model, ct.optimize.coreml.OptimizationConfig(global_config=int8)
-    )
 
 
 def directory_digest(path: Path) -> str:
@@ -167,7 +155,7 @@ class Packed(nn.Module):
 
 def convert_task(tagger, task: str, output: Path, quantize: bool) -> None:
     """One package for the task, with the input length MAX_TOKENS, and its compiled model. Without
-    `quantize` the package is fp32; with it, the task's WEIGHTS setting applies."""
+    `quantize` the package is fp32; with it, fp16."""
     index = torch.arange(MAX_TOKENS)[None]
     example = (torch.randint(0, 1000, (1, MAX_TOKENS)), index % 100, index // 100 + 1)
     with warnings.catch_warnings():
@@ -185,7 +173,7 @@ def convert_task(tagger, task: str, output: Path, quantize: bool) -> None:
             minimum_deployment_target=ct.target.macOS15,
         )
     package = output / f"{task}.mlpackage"
-    (compress(model) if quantize and WEIGHTS[task] == "int8" else model).save(str(package))
+    model.save(str(package))
     ct.utils.compile_model(str(package), str(output / f"{task}.mlmodelc"))
 
 
@@ -202,7 +190,6 @@ def build(model: Path, output: Path, quantize: bool) -> None:
         {
             **common,
             "precision": "float16" if quantize else "float32",
-            "weights": WEIGHTS if quantize else "float32",
             "coremltools": ct.__version__,
             "torch": torch.__version__,
             "digests": {

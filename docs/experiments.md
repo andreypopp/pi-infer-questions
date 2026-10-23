@@ -40,7 +40,25 @@ different sections are not comparable.
 - **Sentence completion, plain and with guards.** Extending a span to
   its sentence end raised exact question F1 on dev from .664 to .692;
   stopping at a `?` and cutting a trailing `, and` raised it to .702
-  with no unit worse than the plain rule. It is in the decoder.
+  with no unit worse than the plain rule. The sentence decoder replaced
+  it.
+- **Whole sentences as question spans.** Snapping both gold and
+  predictions to whole sentences raised exact question F1 on dev from
+  .653 to .715; about 40% of the gap between exact and overlap F1 was
+  sentence boundaries. Three seeds trained on snapped gold with the
+  sentence decoder, against three trained on token spans, on the same
+  new labels (prose questions limited to the asking sentence), dev,
+  snapped gold, mean: exact question F1 .721 against .660, overlap F1
+  .819 against .806, `?` recall .894 against .807, proposal recall .594
+  against .547, option F1 .609 against .575, kind accuracy .947 against
+  .962, false positives 2.8% against 2.2%; the seed spread of exact F1
+  fell from .041 to .011. On eval against the shipped token model:
+  exact question F1 .741 against .636, proposal recall .673 against
+  .550, decision-list overlap precision .632 against .732 (raw gold).
+  Sentence spans ship.
+- **Assistant-message context.** The surrounding reply as model input
+  raised dev means by about .01, inside the seed spread, for 3.3 times
+  the tokens. Not used.
 - **The whole message as labeller context, and DeepSeek V4 Pro as a
   judge.** On 300 dev units, the whole message raised units without a
   two-of-three vote from 2.3% to 7.0% (decision lists 5% to 25%) and
@@ -146,9 +164,10 @@ model before this round found 38% of their items on dev.
   latency. int4 embeddings had no measured loss on the lists-round
   model. On the next model, the option tagger lost .057 option F1 with
   int8 per-channel weights, with int4 or int8 embeddings; int8 per
-  block (32) had no loss but put 62 convolutions on the CPU. The option
-  tagger now ships in fp16 (63 MB), the question tagger in int8 with
-  int8 embeddings (32 MB).
+  block (32) had no loss but put 62 convolutions on the CPU. On the
+  sentence model, int8 on the question tagger changed 7 of 1,298 dev
+  decodes and lost .031 option F1 (choice questions became open). Both
+  taggers now ship in fp16 (62 MB each).
 - **A Linux CPU backend.** ONNX Runtime through its C API, from the same
   Swift module. A TypeScript port of the pipeline and MLX on the CPU
   were considered and not chosen.
