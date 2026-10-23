@@ -2,8 +2,8 @@
 
 A [pi](https://github.com/earendil-works/pi) extension that finds the
 questions in each reply of the agent and makes them answerable with the
-mouse. A small local model reads the reply. No tool call, no change to
-the agent's prompt and no network request is necessary.
+mouse. A small local model reads the reply. No tool call and no network
+request is necessary.
 
 In a completed reply, the extension adds clickable elements after each
 question:
@@ -25,6 +25,12 @@ answer to the editor:
 You can answer several questions, edit the text, and then submit. A
 second click on the same question replaces its answer. **Other** and
 **Answer** add the quote with an empty answer.
+
+The extension also adds five short rules to the agent's system prompt:
+ask decisions as questions that end with `?`, at the end of the reply,
+one per sentence or list item, with the alternatives of a choice named.
+The model finds such questions more reliably than free-form proposals.
+To turn the rules off, start pi with `--no-question-guide`.
 
 ## Requirements
 

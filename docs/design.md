@@ -247,6 +247,24 @@ uses two hooks that it has:
   pi is in fullscreen, and again when pi enters it again, so that hover
   works.
 
+## The question guideline
+
+The model finds a question with `?` much more often than a proposal
+without one. So the extension asks the agent to write decisions as
+questions: in `before_agent_start` it adds five bullets to
+`systemPromptOptions.promptGuidelines` (ask with `?` at the end of the
+reply, one question per sentence or list item, name the alternatives of
+a choice, ask for the go-ahead of a proposal, no questions before a tool
+call). It adds to pi's prompt and does not replace it. The provider gets
+the bullets in the rules section of the system prompt.
+
+The flag `--no-question-guide` turns it off. The first run of a session
+with the guideline appends one entry with `customType`
+`pi-infer-questions-guide` and the bullets as `data.guidelines`. Replies
+after that entry were written under the guideline, so a training round
+can keep them apart: they are easier than replies of agents without it,
+and an eval that mixes them overstates quality.
+
 ## Known limits
 
 - Proposals and decision lists without `?` are the weakest case (55%

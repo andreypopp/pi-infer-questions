@@ -14,6 +14,14 @@ import {
 } from "@earendil-works/pi-tui";
 
 const TYPE = "pi-infer-questions";
+const GUIDE_TYPE = `${TYPE}-guide`;
+const GUIDE = [
+  'When you need a decision or input from the user, ask it as a question that ends with "?", at the end of your reply.',
+  "Put one question in one sentence or one list item.",
+  'For a choice, name the alternatives in the question ("Should I A, B, or C?") or list them as items directly under the question.',
+  'For a proposal, ask for the go-ahead ("Should I do X?"). Do not only write "I recommend X".',
+  "Do not ask questions in text that comes before a tool call. Ask only when you stop.",
+];
 const BUTTON_MOTION = "\x1b[?1000h\x1b[?1002h\x1b[?1004h\x1b[?1006h";
 const ANY_MOTION = "\x1b[?1003h";
 const OPEN = "\uE010";
@@ -166,6 +174,20 @@ export default function (pi: ExtensionAPI) {
   }
   const { native } = loaded;
   const texts = new Set<string>();
+
+  pi.registerFlag("no-question-guide", {
+    description: "Do not add the question-asking guideline to the system prompt",
+    type: "boolean",
+    default: false,
+  });
+
+  pi.on("before_agent_start", (event, ctx) => {
+    if (pi.getFlag("no-question-guide")) return;
+    event.systemPromptOptions.promptGuidelines.push(...GUIDE);
+    if (!ctx.sessionManager.getEntries().some((entry) => entry.type === "custom" && entry.customType === GUIDE_TYPE)) {
+      pi.appendEntry(GUIDE_TYPE, { guidelines: GUIDE });
+    }
+  });
 
   pi.registerMarkdownTransformer((markdown, context) =>
     context.messageType === "assistant" && !context.isStreaming && texts.has(markdown.trim()) ? "" : markdown,
