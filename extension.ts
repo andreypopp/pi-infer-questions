@@ -66,6 +66,34 @@ let lastHoverMove = 0;
 let tui: TUI | undefined;
 let editor: Pick<ExtensionUIContext, "getEditorText" | "setEditorText"> | undefined;
 const patched = new WeakSet<TUI>();
+const collapsed = new WeakSet<Component>();
+
+const parentOf = (node: Component, child: Component): Container | undefined => {
+  const children = (node as Container).children ?? [];
+  if (children.includes(child)) return node as Container;
+  for (const next of children) {
+    const found = parentOf(next, child);
+    if (found) return found;
+  }
+  return undefined;
+};
+
+// pi still draws a spacer line for the assistant message whose text the transformer hides, and the custom
+// entry adds its own spacer, so the reply would move down one row when its entry replaces it.
+const collapseHidden = (root: Component): boolean => {
+  const entry = tui && parentOf(tui, root);
+  const chat = entry && tui && parentOf(tui, entry);
+  const hidden = chat?.children[chat.children.indexOf(entry) - 1];
+  if (!hidden || collapsed.has(hidden)) return false;
+  collapsed.add(hidden);
+  const render = hidden.render.bind(hidden);
+  hidden.render = (width) => {
+    const lines = render(width);
+    return lines.every((line) => visibleWidth(line) === 0) ? [] : lines;
+  };
+  return true;
+};
+let latest: Component | undefined;
 
 const blocks = (cps: string[]): [number, number][] => {
   const found: [number, number][] = [];
@@ -167,10 +195,10 @@ class Interactive implements Component {
       if (cell.reply) this.send(cell.reply);
       return { handled: true };
     }
-    if (event.type !== "move" && event.type !== "drag") return undefined;
+    if (event.type !== "move" || !cell) return undefined;
     lastHoverMove = moves;
-    if (hovered === cell?.id) return { handled: true };
-    hovered = cell?.id;
+    if (hovered === cell.id) return { handled: true };
+    hovered = cell.id;
     return { handled: true, render: true };
   }
 
@@ -251,6 +279,7 @@ export default function (pi: ExtensionAPI) {
           if (questions.length === 0) return;
           texts.add(markdown);
           pi.appendEntry<Data>(TYPE, { markdown, questions });
+          if (latest) collapseHidden(latest);
           tui?.invalidate();
           tui?.requestRender();
         })
@@ -266,6 +295,16 @@ export default function (pi: ExtensionAPI) {
     const cps = Array.from(markdown);
     const markdownTheme = getMarkdownTheme();
     const root = new Container();
+    latest = root;
+    let placed = false;
+    const render = root.render.bind(root);
+    root.render = (width) => {
+      if (!placed) {
+        placed = true;
+        if (collapseHidden(root)) tui?.requestRender();
+      }
+      return render(width);
+    };
     const cut = (from: number, to: number) => cps.slice(from, to).join("");
     const quotes = questions.map(({ range: [start, end] }) =>
       cut(start, end)
