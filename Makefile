@@ -6,6 +6,7 @@ SOURCES = $(wildcard native/*.swift)
 
 NPM_NAME = @andreypopp/pi-infer-questions
 VERSION = $(shell node -p "require('./package.json').version")
+NATIVE_VERSION = $(shell node -p "require('./package.json').optionalDependencies['$(PKG_NAME)']")
 
 ifeq ($(OS),Darwin)
 NPM_PLATFORM = darwin-arm64
@@ -97,8 +98,8 @@ $(BUILD)/questions.node: $(SOURCES) $(BUILD)/napi.o $(SWIFT_DEPS)
 $(PACK)/settings.json:
 	rm -rf $(BUILD)/fetch
 	mkdir -p $(BUILD)/fetch $(PACK)
-	@npm pack $(PKG_NAME)@$(VERSION) --pack-destination $(BUILD)/fetch --silent >/dev/null \
-	  || { echo "no models in $(PACK) and $(PKG_NAME)@$(VERSION) is not published: train and convert them (see the pipeline), or publish the package"; exit 1; }
+	@npm pack $(PKG_NAME)@$(NATIVE_VERSION) --pack-destination $(BUILD)/fetch --silent >/dev/null \
+	  || { echo "no models in $(PACK) and $(PKG_NAME)@$(NATIVE_VERSION) is not published: train and convert them (see the pipeline), or publish the package"; exit 1; }
 	tar -xzf $(BUILD)/fetch/*.tgz -C $(PACK) --strip-components=2 package/models
 	tar -xzf $(BUILD)/fetch/*.tgz -O package/golden.json > $(GOLDEN)
 
@@ -120,7 +121,10 @@ npm-linux:
 
 publish:
 	@test -n "$$(ls $(DIST)/*.tgz 2>/dev/null)" || { echo "no tarballs in $(DIST): run make npm on every platform"; exit 1; }
-	for t in $(filter-out $(MAIN_TGZ),$(wildcard $(DIST)/*.tgz)) $(MAIN_TGZ); do npm publish $$t --access public || exit 1; done
+	for t in $(filter-out $(MAIN_TGZ),$(wildcard $(DIST)/*.tgz)) $(MAIN_TGZ); do \
+	  spec=$$(tar -xzOf $$t package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); p.name + "@" + p.version'); \
+	  if npm view $$spec version >/dev/null 2>&1; then echo "$$spec is already published"; else npm publish $$t --access public || exit 1; fi; \
+	done
 
 # Needs asciinema and agg.
 demo: package

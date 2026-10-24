@@ -67,6 +67,7 @@ let tui: TUI | undefined;
 let editor: Pick<ExtensionUIContext, "getEditorText" | "setEditorText"> | undefined;
 const patched = new WeakSet<TUI>();
 const collapsed = new WeakSet<Component>();
+const pending = new Map<string, Component>();
 
 const parentOf = (node: Component, child: Component): Container | undefined => {
   const children = (node as Container).children ?? [];
@@ -83,8 +84,9 @@ const parentOf = (node: Component, child: Component): Container | undefined => {
 const collapseHidden = (root: Component): boolean => {
   const entry = tui && parentOf(tui, root);
   const chat = entry && tui && parentOf(tui, entry);
-  const hidden = chat?.children[chat.children.indexOf(entry) - 1];
-  if (!hidden || collapsed.has(hidden)) return false;
+  if (!chat) return false;
+  const hidden = chat.children[chat.children.indexOf(entry) - 1];
+  if (!hidden || collapsed.has(hidden)) return true;
   collapsed.add(hidden);
   const render = hidden.render.bind(hidden);
   hidden.render = (width) => {
@@ -93,7 +95,6 @@ const collapseHidden = (root: Component): boolean => {
   };
   return true;
 };
-let latest: Component | undefined;
 
 const blocks = (cps: string[]): [number, number][] => {
   const found: [number, number][] = [];
@@ -236,6 +237,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     texts.clear();
+    pending.clear();
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === TYPE) texts.add((entry.data as Data).markdown);
     }
@@ -248,6 +250,12 @@ export default function (pi: ExtensionAPI) {
         patched.add(current);
         const write = terminal.write.bind(terminal);
         terminal.write = (data) => write(data.includes(BUTTON_MOTION) ? data + ANY_MOTION : data);
+        const frame = current as unknown as { doRender(): void };
+        const doRender = frame.doRender.bind(current);
+        frame.doRender = () => {
+          for (const [id, root] of pending) if (collapseHidden(root)) pending.delete(id);
+          doRender();
+        };
         const mouse = current as unknown as { handleMouseEvent?(raw: unknown): void };
         if (mouse.handleMouseEvent) {
           const handle = mouse.handleMouseEvent.bind(current);
@@ -279,7 +287,6 @@ export default function (pi: ExtensionAPI) {
           if (questions.length === 0) return;
           texts.add(markdown);
           pi.appendEntry<Data>(TYPE, { markdown, questions });
-          if (latest) collapseHidden(latest);
           tui?.invalidate();
           tui?.requestRender();
         })
@@ -295,16 +302,7 @@ export default function (pi: ExtensionAPI) {
     const cps = Array.from(markdown);
     const markdownTheme = getMarkdownTheme();
     const root = new Container();
-    latest = root;
-    let placed = false;
-    const render = root.render.bind(root);
-    root.render = (width) => {
-      if (!placed) {
-        placed = true;
-        if (collapseHidden(root)) tui?.requestRender();
-      }
-      return render(width);
-    };
+    pending.set(entry.id, root);
     const cut = (from: number, to: number) => cps.slice(from, to).join("");
     const quotes = questions.map(({ range: [start, end] }) =>
       cut(start, end)

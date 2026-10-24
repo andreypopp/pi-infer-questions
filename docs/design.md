@@ -247,8 +247,12 @@ the package of the current platform. There is no install script.
 `make` links the package that it builds into the checkout's
 `node_modules`, so the checkout loads the same way.
 
-The version is in the root `package.json` only. Publish the platform
-packages before the main package.
+The main package's version is `version` in the root `package.json`.
+The platform packages' version is the one that `optionalDependencies`
+pins, so a change to `extension.ts` alone publishes only the main
+package. When the native code or the models change, bump the pins too.
+`make publish` publishes the platform packages first and skips each
+version that npm already has.
 
 ## The native module
 

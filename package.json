@@ -13,8 +13,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "optionalDependencies": {
-    "@andreypopp/pi-infer-questions-darwin-arm64": "0.1.1",
-    "@andreypopp/pi-infer-questions-linux-arm64": "0.1.1",
-    "@andreypopp/pi-infer-questions-linux-x64": "0.1.1"
+    "@andreypopp/pi-infer-questions-darwin-arm64": "0.1.0",
+    "@andreypopp/pi-infer-questions-linux-arm64": "0.1.0",
+    "@andreypopp/pi-infer-questions-linux-x64": "0.1.0"
   }
 }
