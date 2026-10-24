@@ -5,6 +5,8 @@ questions in the agent's replies and lets you answer them with a click.
 A small local model reads each reply. It makes no tool call and no
 network request.
 
+![A reply with three questions: a click on an option, on Yes and on Answer fills the editor](docs/demo.gif)
+
 After each question in a completed reply, the extension adds controls:
 
 | Question | Controls |
@@ -86,6 +88,7 @@ and curl.
     make smoke    # the native module against the golden file
     make e2e      # pi in fullscreen on a private tmux server
     make npm      # npm tarballs for this platform into build/npm-dist
+    make demo     # records docs/demo.gif (needs asciinema and agg)
 
 To use the checkout in pi, add `"<checkout>/extension.ts"` to
 `extensions` in `~/.pi/agent/settings.json`. If `data/` has no models,

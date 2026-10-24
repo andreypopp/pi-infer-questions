@@ -105,6 +105,7 @@ interface Cell {
 
 class Interactive implements Component {
   private cells: Cell[] = [];
+  private last?: { lines: string[]; hover?: string; out: string[] };
 
   constructor(
     private readonly inner: Component,
@@ -115,15 +116,18 @@ class Interactive implements Component {
   ) {}
 
   render(width: number): string[] {
+    const lines = this.inner.render(width);
+    const hover = hovered?.startsWith(`${this.id}:`) ? hovered : undefined;
+    if (this.last?.lines === lines && this.last.hover === hover) return this.last.out;
     const [open, close] = this.theme.fg("accent", "\0").split("\0");
     this.cells = [];
     let option = -1;
     let seen = -1;
-    let hover = false;
-    const optionOn = () => `${open}${hover ? "\x1b[4;7m" : "\x1b[4m"}`;
-    const optionOff = () => `${hover ? "\x1b[24;27m" : "\x1b[24m"}${close}`;
+    let lit = false;
+    const optionOn = () => `${open}${lit ? "\x1b[4;7m" : "\x1b[4m"}`;
+    const optionOff = () => `${lit ? "\x1b[24;27m" : "\x1b[24m"}${close}`;
     const reapply = () => (option >= 0 ? optionOn() : "");
-    return this.inner.render(width).map((line, row) => {
+    const rendered = lines.map((line, row) => {
       let out = reapply();
       let column = 0;
       let cell: Cell | undefined;
@@ -136,7 +140,7 @@ class Interactive implements Component {
       for (const [token] of line.matchAll(TOKEN)) {
         if (token === OPEN) {
           option = ++seen;
-          hover = `${this.id}:${option}` === hovered;
+          lit = `${this.id}:${option}` === hover;
           out += optionOn();
           begin();
         } else if (token === CLOSE) {
@@ -153,6 +157,8 @@ class Interactive implements Component {
       }
       return out + (option >= 0 ? optionOff() : "");
     });
+    this.last = { lines, hover, out: rendered };
+    return rendered;
   }
 
   handleMouse(event: TuiMouseEvent) {
@@ -169,6 +175,7 @@ class Interactive implements Component {
   }
 
   invalidate(): void {
+    this.last = undefined;
     this.inner.invalidate();
   }
 }

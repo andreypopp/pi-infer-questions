@@ -45,7 +45,7 @@ LINK = node_modules/$(PKG_NAME)
 DIST = $(BUILD)/npm-dist
 MAIN_TGZ = $(DIST)/andreypopp-pi-infer-questions-$(VERSION).tgz
 
-.PHONY: all package smoke clean e2e npm npm-linux publish
+.PHONY: all package smoke clean e2e npm npm-linux publish demo
 
 all: package
 
@@ -121,6 +121,11 @@ npm-linux:
 publish:
 	@test -n "$$(ls $(DIST)/*.tgz 2>/dev/null)" || { echo "no tarballs in $(DIST): run make npm on every platform"; exit 1; }
 	for t in $(filter-out $(MAIN_TGZ),$(wildcard $(DIST)/*.tgz)) $(MAIN_TGZ); do npm publish $$t --access public || exit 1; done
+
+# Needs asciinema and agg.
+demo: package
+	node scripts/demo.mjs $(BUILD)/demo.cast
+	agg --font-size 16 --idle-time-limit 1.5 $(BUILD)/demo.cast docs/demo.gif
 
 clean:
 	rm -rf $(BUILD) node_modules
