@@ -37,6 +37,9 @@ struct Models {
         try check(api, api.pointee.DisableTelemetryEvents(environment))
         var options: OpaquePointer?
         try check(api, api.pointee.CreateSessionOptions(&options))
+        // ONNX Runtime sizes its pools by the cores of the host and pins them. In a cpuset the pinning fails
+        // and logs to the terminal; under a cgroup quota the pools oversubscribe.
+        try check(api, api.pointee.SetIntraOpNumThreads(options, Int32(min(4, ProcessInfo.processInfo.activeProcessorCount))))
         var created: [String: OpaquePointer] = [:]
         for task in settings.tags.keys.sorted() {
             var session: OpaquePointer?

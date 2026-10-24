@@ -37,9 +37,11 @@ To turn the rules off, start pi with `--no-question-guide`.
 - pi in fullscreen mode (`"tuiMode": "fullscreen"` in
   `~/.pi/agent/settings.json`). Clicks work only in fullscreen mode.
 - macOS 15 or later on Apple silicon (the model runs on the Neural
-  Engine), or Linux on arm64 (the model runs on the CPU through ONNX
-  Runtime). Linux on x64 builds, but its models are not released yet:
-  see [plans/linux.md](plans/linux.md).
+  Engine), or Linux on arm64 or x64 (the model runs on the CPU through
+  ONNX Runtime). x64 is tested on AVX-512 VNNI CPUs (AMD Zen 4 and
+  later, Intel Ice Lake Xeon and later); on CPUs with only AVX2 the
+  options can be less accurate. See [plans/linux.md](plans/linux.md)
+  for what is not tested yet.
 - To build: Node 24 or later with its headers, Swift 6, cmake and curl.
 
 On other platforms, or when the models do not load, the extension shows

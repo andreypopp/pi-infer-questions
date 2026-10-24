@@ -34,7 +34,8 @@ rejected; read it before you propose an experiment. Open work is in
   install` removes the old file first.
 - Core ML packs and ONNX int8 decode a little differently from PyTorch;
   x64 and arm64 int8 differ from each other. Each backend and
-  architecture has its own golden file.
+  architecture has its own golden file. The x64 golden and parity come
+  from a real x64 machine with AVX-512 VNNI, not from emulation.
 - Model output changes the e2e expectations: the e2e uses fake replies
   whose questions the shipped model must find (for example, one fake
   reply must give exactly one option). After a model change, check them.

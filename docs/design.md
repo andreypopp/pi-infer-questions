@@ -209,8 +209,23 @@ normalization removes the backticks from the model input.
 
 `convert-onnx` (`onnx_pack.py`) exports both taggers to ONNX with
 dynamic batch and sequence length (no packing; units are batched by
-length) and int8 weights, into `data/onnx`. `parity-onnx` has the same
-two gates. The Makefile downloads the official ONNX Runtime build
+length) and int8 weights, into `data/onnx`. One int8 pack serves x64
+and arm64; each architecture has its own release archive and golden
+file. `parity-onnx` has the same two gates.
+
+int8 results depend on the CPU's kernels. x64 is validated on AVX-512
+VNNI (AMD EPYC Zen 5). Without VNNI, x64 adds pairs of 8-bit products
+into a saturating 16-bit value; in qemu, which has no VNNI, option F1
+dropped by .08. Such CPUs (AVX2 only) can lose option quality. fp32
+models decode like PyTorch on every CPU, but are 4 times the size
+(257 MB) and 2.4 times slower on x64.
+
+The engine limits ONNX Runtime to `min(4, cores)` intra-op threads.
+By default, ONNX Runtime sizes its pools by the cores of the host and
+pins them: in a cpuset the pinning fails and logs to the terminal,
+and under a cgroup quota the pools oversubscribe.
+
+The Makefile downloads the official ONNX Runtime build
 (pinned version and sha256), and the `.node` loads `libonnxruntime.so`
 from its own directory.
 

@@ -124,7 +124,7 @@ try {
   await until("first answer", () => editorText().includes("risky?\n\nacceptable"));
   const plan = find("next week? Yes/No/Other");
   click({ x: plan.x + "next week? ".length - 1, y: plan.y });
-  await until("stripped quotes", () => editorText() === "> Is the option to drop the cache acceptable, or is it too risky?\n\nacceptable\n\n> 2. Plan: Is there a plan to ship the docs next week?\n\nYes");
+  await until("stripped quotes", () => editorText() === "> Is dropping the cache acceptable, or is it too risky?\n\nacceptable\n\n> 2. Plan: Is there a plan to ship the docs next week?\n\nYes");
   check("quotes lose the markup", true);
   tmux("send-keys", "-t", pane, "Enter");
   await until("one sent", () => userLines().length === 5);

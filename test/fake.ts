@@ -5,9 +5,9 @@ import { appendFileSync } from "node:fs";
 const QUESTION =
   "I looked at the options.\n\nWhich database should we use: **PostgreSQL**, SQLite or MySQL?\n\n```sh\nwhat is this?\n```\n\nShould I continue with the migration?\n\nTrailing note.";
 const LIST =
-  "Four things need your decision:\n\n1. The cache. Should I keep it? Do you prefer to drop it or to shrink it?\n2. The API. Should I rename it? Do you want v2 or v3?\n3. The tests. Should I add them now? Do you want unit or e2e tests?\n4. The docs. Should I update them? Do you prefer Markdown or HTML?";
+  "Four things need your decision:\n\n1. The cache: Should we keep the cache? Do you prefer to drop it or to shrink it?\n2. The API: Should we rename the API? Do you want v2 or v3?\n3. The tests: Should we add the tests now? Do you want unit or e2e tests?\n4. The docs: Should we update the docs? Do you prefer Markdown or HTML?";
 const ONE =
-  "Two points:\n\nIs the option to drop the cache acceptable, or is it too risky?\n2. **Plan:** Is there a plan to ship the docs next week?";
+  "Two points:\n\nIs dropping the cache acceptable, or is it too risky?\n2. **Plan:** Is there a plan to ship the docs next week?";
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 const reply = (model: any, text: string, stop: "stop" | "aborted") => {
