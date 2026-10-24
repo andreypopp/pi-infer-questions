@@ -1,0 +1,20 @@
+{
+  "name": "@andreypopp/pi-infer-questions",
+  "version": "0.1.0",
+  "description": "A pi extension that finds the questions in the agent's replies and lets you answer them",
+  "keywords": ["pi-package"],
+  "license": "Apache-2.0",
+  "author": "Andrey Popp",
+  "repository": "github:andreypopp/pi-infer-questions",
+  "files": ["extension.ts", "LICENSE", "NOTICE"],
+  "pi": { "extensions": ["./extension.ts"] },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "optionalDependencies": {
+    "@andreypopp/pi-infer-questions-darwin-arm64": "0.1.0",
+    "@andreypopp/pi-infer-questions-linux-arm64": "0.1.0",
+    "@andreypopp/pi-infer-questions-linux-x64": "0.1.0"
+  }
+}

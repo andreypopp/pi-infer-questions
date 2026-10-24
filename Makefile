@@ -2,14 +2,13 @@ OS := $(shell uname -s)
 NODE_INCLUDE ?= $(shell dirname $$(command -v node))/../include/node
 DATA ?= data
 BUILD ?= build
-MODELS ?= models
 SOURCES = $(wildcard native/*.swift)
 
-MODELS_VERSION ?= 0.1.0
-RELEASE_URL ?= https://github.com/andreypopp/pi-infer-questions/releases/download/v$(MODELS_VERSION)
+NPM_NAME = @andreypopp/pi-infer-questions
+VERSION = $(shell node -p "require('./package.json').version")
 
 ifeq ($(OS),Darwin)
-PLATFORM = macos-arm64
+NPM_PLATFORM = darwin-arm64
 TARGET = -target arm64-apple-macos15
 PACK ?= $(DATA)/coreml-ane-pack
 GOLDEN ?= $(DATA)/golden-pi.json
@@ -18,7 +17,7 @@ SWIFT_LINK = -Xlinker -undefined -Xlinker dynamic_lookup
 SWIFT_DEPS =
 CMARK_FLAGS = -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DCMAKE_OSX_ARCHITECTURES=arm64
 else
-PLATFORM = linux-$(ORT_ARCH)
+NPM_PLATFORM = linux-$(if $(filter x86_64,$(shell uname -m)),x64,arm64)
 TARGET =
 PACK ?= $(DATA)/onnx
 GOLDEN ?= $(DATA)/golden-onnx-$(ORT_ARCH).json
@@ -40,16 +39,32 @@ CMARK = $(BUILD)/cmark-gfm
 SWIFT_LINK += -I $(CMARK)/include -L$(CMARK)/lib -lcmark-gfm-extensions -lcmark-gfm
 SWIFT_DEPS += $(CMARK)/lib/libcmark-gfm.a
 
-ARCHIVE = pi-infer-questions-models-$(PLATFORM).tar.gz
+PKG = $(BUILD)/npm/$(NPM_PLATFORM)
+PKG_NAME = $(NPM_NAME)-$(NPM_PLATFORM)
+LINK = node_modules/$(PKG_NAME)
+DIST = $(BUILD)/npm-dist
+MAIN_TGZ = $(DIST)/andreypopp-pi-infer-questions-$(VERSION).tgz
 
-.PHONY: all models release-assets smoke install clean e2e
+.PHONY: all package smoke clean e2e npm publish
 
-all: questions.node models
+all: package
 
-questions.node: $(BUILD)/questions.node
-	rm -f $@
-	cp $< $@
-	$(if $(ORT),rm -f libonnxruntime.so* && cp -P $(BUILD)/libonnxruntime.so* .)
+package: $(BUILD)/questions.node $(PACK)/settings.json
+	mkdir -p $(PKG)/models
+	@cmp -s $(BUILD)/questions.node $(PKG)/questions.node || { rm -f $(PKG)/questions.node; cp $(BUILD)/questions.node $(PKG)/questions.node; }
+	$(if $(ORT),cp $(ORT)/lib/libonnxruntime.so.1 $(PKG)/libonnxruntime.so.1)
+	@for f in $(PACK_FILES); do \
+	  diff -rq $(PACK)/$$f $(PKG)/models/$$f >/dev/null 2>&1 || { rm -rf $(PKG)/models/$$f; cp -R $(PACK)/$$f $(PKG)/models/$$f; echo "models: $$f"; }; \
+	done
+	cp $(GOLDEN) $(PKG)/golden.json
+	cp LICENSE NOTICE $(PKG)/
+	mkdir -p $(PKG)/licenses/cmark-gfm && cp $(BUILD)/cmark-gfm-src/COPYING $(PKG)/licenses/cmark-gfm/
+	printf '\nThis package includes cmark-gfm (BSD-2-Clause and others). Its license is in licenses/cmark-gfm/.\n' >> $(PKG)/NOTICE
+	$(if $(ORT),mkdir -p $(PKG)/licenses/onnxruntime && cp $(ORT)/LICENSE $(ORT)/ThirdPartyNotices.txt $(PKG)/licenses/onnxruntime/ \
+	  && printf '\nThis package includes ONNX Runtime (MIT License). Its license and third-party notices are in licenses/onnxruntime/.\n' >> $(PKG)/NOTICE)
+	node scripts/platform-package.mjs $(NPM_PLATFORM) $(PKG)
+	mkdir -p $(dir $(LINK))
+	ln -sfn $(abspath $(PKG)) $(LINK)
 
 $(BUILD)/napi.o: native/napi.c
 	@mkdir -p $(BUILD)
@@ -78,44 +93,29 @@ $(BUILD)/questions.node: $(SOURCES) $(BUILD)/napi.o $(SWIFT_DEPS)
 	rm -f $@
 	swiftc $(TARGET) -O -swift-version 5 -warnings-as-errors -module-name questions -emit-library \
 	  $(SWIFT_LINK) -o $@ $(SOURCES) $(BUILD)/napi.o
-	$(if $(ORT),cp -P $(ORT)/lib/libonnxruntime.so* $(BUILD)/)
 
 $(PACK)/settings.json:
-	mkdir -p $(BUILD)/release $(PACK)
-	@curl -fsSL -o $(BUILD)/release/$(ARCHIVE) $(RELEASE_URL)/$(ARCHIVE) \
-	  && curl -fsSL -o $(BUILD)/release/$(ARCHIVE).sha256 $(RELEASE_URL)/$(ARCHIVE).sha256 \
-	  || { echo "no models in $(PACK) and no release assets at $(RELEASE_URL)/$(ARCHIVE): train and convert them (see the pipeline), or set RELEASE_URL and MODELS_VERSION"; exit 1; }
-	cd $(BUILD)/release && shasum -a 256 -c $(ARCHIVE).sha256
-	tar -xzf $(BUILD)/release/$(ARCHIVE) -C $(PACK)
-	mv $(PACK)/golden.json $(GOLDEN)
+	rm -rf $(BUILD)/fetch
+	mkdir -p $(BUILD)/fetch $(PACK)
+	@npm pack $(PKG_NAME)@$(VERSION) --pack-destination $(BUILD)/fetch --silent >/dev/null \
+	  || { echo "no models in $(PACK) and $(PKG_NAME)@$(VERSION) is not published: train and convert them (see the pipeline), or publish the package"; exit 1; }
+	tar -xzf $(BUILD)/fetch/*.tgz -C $(PACK) --strip-components=2 package/models
+	tar -xzf $(BUILD)/fetch/*.tgz -O package/golden.json > $(GOLDEN)
 
-models: $(PACK)/settings.json
-	@mkdir -p $(MODELS)
-	@for f in $(PACK_FILES); do \
-	  diff -rq $(PACK)/$$f $(MODELS)/$$f >/dev/null 2>&1 || { rm -rf $(MODELS)/$$f; cp -R $(PACK)/$$f $(MODELS)/$$f; echo "models: $$f"; }; \
-	done
+smoke: package
+	node test/smoke.js $(PKG)/questions.node $(PKG)/models $(PKG)/golden.json
 
-release-assets: models
-	mkdir -p $(BUILD)/release
-	cp $(GOLDEN) $(BUILD)/release/golden.json
-	tar -czf $(BUILD)/release/$(ARCHIVE) -C $(PACK) $(PACK_FILES) -C $(abspath $(BUILD)/release) golden.json
-	cd $(BUILD)/release && shasum -a 256 $(ARCHIVE) > $(ARCHIVE).sha256
+npm: package
+	mkdir -p $(DIST)
+	npm pack $(PKG) --pack-destination $(DIST)
+	npm pack . --pack-destination $(DIST)
 
-smoke: all
-	node test/smoke.js $(BUILD)/questions.node $(MODELS) $(GOLDEN)
-
-install: all
-	@test -n "$(DEST)" || { echo "DEST=<extension dir> is required"; exit 1; }
-	mkdir -p $(DEST)
-	cp extension.ts $(DEST)/extension.ts
-	rm -f $(DEST)/questions.node
-	cp $(BUILD)/questions.node $(DEST)/questions.node
-	$(if $(ORT),rm -f $(DEST)/libonnxruntime.so* && cp -P $(BUILD)/libonnxruntime.so* $(DEST)/)
-	@diff -rq $(MODELS) $(DEST)/models >/dev/null 2>&1 || { rm -rf $(DEST)/models; cp -R $(MODELS) $(DEST)/models; }
+publish:
+	@test -n "$$(ls $(DIST)/*.tgz 2>/dev/null)" || { echo "no tarballs in $(DIST): run make npm on every platform"; exit 1; }
+	for t in $(filter-out $(MAIN_TGZ),$(wildcard $(DIST)/*.tgz)) $(MAIN_TGZ); do npm publish $$t --access public || exit 1; done
 
 clean:
-	rm -rf $(BUILD) $(MODELS) questions.node libonnxruntime.so*
+	rm -rf $(BUILD) node_modules
 
-e2e: DEST := $(BUILD)/extension
-e2e: install
-	node test/e2e.mjs $(DEST)/extension.ts
+e2e: package
+	node test/e2e.mjs extension.ts

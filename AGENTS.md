@@ -30,8 +30,8 @@ rejected; read it before you propose an experiment. Open work is in
 ## Traps
 
 - Do not overwrite `questions.node` in place. On macOS, the next Node
-  process that loads it is killed (a stale code signature). `make
-  install` removes the old file first.
+  process that loads it is killed (a stale code signature). `make`
+  removes the old file first.
 - Core ML packs and ONNX int8 decode a little differently from PyTorch;
   x64 and arm64 int8 differ from each other. Each backend and
   architecture has its own golden file. The x64 golden and parity come

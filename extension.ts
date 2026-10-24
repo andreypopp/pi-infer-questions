@@ -1,6 +1,5 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getMarkdownTheme, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
@@ -40,17 +39,24 @@ interface Data {
   questions: Analysis[];
 }
 
-const here = dirname(fileURLToPath(import.meta.url));
 type Native = { start(models: string): void; questions(markdown: string): Promise<string> };
 const loaded: { native: Native } | { error: string } = (() => {
   const platform = `${process.platform}-${process.arch}`;
   if (!["darwin-arm64", "linux-arm64", "linux-x64"].includes(platform)) return { error: `${platform} is not supported` };
+  const name = `@andreypopp/pi-infer-questions-${platform}`;
+  const require = createRequire(import.meta.url);
+  let root: string;
   try {
-    const addon = createRequire(import.meta.url)(join(here, "questions.node"));
-    addon.start(join(here, "models"));
+    root = dirname(require.resolve(`${name}/package.json`));
+  } catch {
+    return { error: `the package ${name} is not installed; install with optional dependencies enabled` };
+  }
+  try {
+    const addon = require(join(root, "questions.node"));
+    addon.start(join(root, "models"));
     return { native: addon as Native };
   } catch (error) {
-    return { error: `the module or the models in ${here} do not load: ${error instanceof Error ? error.message : error}` };
+    return { error: `the module or the models in ${root} do not load: ${error instanceof Error ? error.message : error}` };
   }
 })();
 

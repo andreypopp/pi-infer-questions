@@ -1,111 +1,102 @@
 # pi-infer-questions
 
 A [pi](https://github.com/earendil-works/pi) extension that finds the
-questions in each reply of the agent and makes them answerable with the
-mouse. A small local model reads the reply. No tool call and no network
-request is necessary.
+questions in the agent's replies and lets you answer them with a click.
+A small local model reads each reply. It makes no tool call and no
+network request.
 
-In a completed reply, the extension adds clickable elements after each
-question:
+After each question in a completed reply, the extension adds controls:
 
-| The question | The elements |
+| Question | Controls |
 |---|---|
 | A choice ("Should I push now, or wait for CI?") | each option in place, then **Other** |
-| A choice with one option | the option, then **Yes/Other** |
-| A yes/no question or a proposal ("I recommend X. Say the word.") | **Yes/No/Other** |
+| A choice with one option | the option, then **Yes** / **Other** |
+| A yes/no question or a proposal ("I recommend X. Say the word.") | **Yes** / **No** / **Other** |
 | An open question ("What should the name be?") | **Answer** |
 
-A click does not send anything. It adds the question as a quote and the
-answer to the editor:
+A click sends nothing. It puts the question, as a quote, and your
+answer in the editor:
 
     > Should I push now, or wait for CI?
 
     wait for CI
 
 You can answer several questions, edit the text, and then submit. A
-second click on the same question replaces its answer. **Other** and
-**Answer** add the quote with an empty answer.
+second click on the same question replaces its answer.
 
-The extension also adds five short rules to the agent's system prompt:
-ask decisions as questions that end with `?`, at the end of the reply,
-one per sentence or list item, with the alternatives of a choice named.
-The model finds such questions more reliably than free-form proposals.
-To turn the rules off, start pi with `--no-question-guide`.
+The extension also adds five short rules to the system prompt that tell
+the agent to ask its decisions as clear questions at the end of the
+reply. The model finds these more reliably. Start pi with
+`--no-question-guide` to turn the rules off.
 
-## Requirements
+## Install
+
+    pi install npm:@andreypopp/pi-infer-questions
+
+Then restart pi. The extension needs:
 
 - pi in fullscreen mode (`"tuiMode": "fullscreen"` in
   `~/.pi/agent/settings.json`). Clicks work only in fullscreen mode.
 - macOS 15 or later on Apple silicon (the model runs on the Neural
-  Engine), or Linux on arm64 or x64 (the model runs on the CPU through
-  ONNX Runtime). x64 is tested on AVX-512 VNNI CPUs (AMD Zen 4 and
-  later, Intel Ice Lake Xeon and later); on CPUs with only AVX2 the
-  options can be less accurate. See [plans/linux.md](plans/linux.md)
-  for what is not tested yet.
-- To build: Node 24 or later with its headers, Swift 6, cmake and curl.
+  Engine), or Linux with glibc on arm64 or x64 (the model runs on the
+  CPU). On x64, CPUs without AVX-512 VNNI can give less accurate
+  options.
 
-On other platforms, or when the models do not load, the extension shows
-one notice and pi renders replies as usual.
-
-## Install
-
-    make install DEST=~/.local/share/pi-infer-questions
-
-`make` downloads the models for your platform from the GitHub release
-(`MODELS_VERSION`, `RELEASE_URL`) and checks their sha256. Then add the
-extension to `~/.pi/agent/settings.json`:
-
-    "extensions": ["/Users/<you>/.local/share/pi-infer-questions/extension.ts"]
-
-Restart pi. `install` replaces `questions.node` with a new file. Do not
-overwrite it in place: on macOS, the next Node process that loads an
-overwritten file is killed.
-
-To work on the extension, load it from the checkout: `make` puts
-`questions.node` and `models/` next to `extension.ts`, so the entry can
-be `"<checkout>/extension.ts"`. After `make`, restart pi.
+npm downloads only the package for your platform: about 120 MB on
+macOS, 80 MB on Linux. On other platforms, pi shows one notice and
+renders replies as usual.
 
 ## How it works
 
-The extension waits until a reply is complete. Then a native module
-(Swift, one `.node` file) does these steps in the pi process:
+When a reply is complete, a native module (Swift) does these steps in
+the pi process:
 
-1. It splits the reply's Markdown into units: paragraphs, and lists with
-   the text that introduces them.
-2. It skips units without `?` and without a decision word.
-3. A question tagger (a 32M-parameter encoder) marks each question and
-   its kind: yes/no, open or choice.
-4. An option tagger marks the options in each choice question.
+1. It splits the Markdown into paragraphs and lists.
+2. It skips the parts without `?` and without a decision word.
+3. A question tagger (a 32M-parameter encoder) marks each question
+   sentence and its kind: yes/no, open or choice.
+4. An option tagger marks the options of each choice question.
 
 A reply takes a few milliseconds. See [docs/design.md](docs/design.md).
 
 ## Quality
 
-One held-out evaluation of the shipped model on 3,060 units from real
-coding-agent replies (PyTorch model; the Neural Engine and ONNX models
-are within .02 on every metric). The model marks whole sentences, so the
-gold spans are snapped to whole sentences too:
+Held-out evaluation on 3,060 parts of real coding-agent replies, with
+whole-sentence spans:
 
 | | |
 |---|---|
-| Questions found, with `?` (exact span) | 87% |
-| Questions found, overlapping span | 83% |
+| Questions with `?` found | 87% |
 | Proposals without `?` found | 67% |
-| Question F1, exact span / overlapping span | .741 / .828 |
+| Question F1, exact / overlapping span | .741 / .828 |
 | Kind accuracy | .963 |
 | Option F1, end to end | .579 |
-| Units without a question that get one (false positives) | 3.3% |
+| Parts without a question that get one | 3.3% |
 
-It misses most often a proposal without `?` and an item of a list of
-decisions without `?`. Units that contain neither `?` nor a decision
-word never reach the model, and this table does not count their
-questions.
+The shipped Neural Engine and ONNX models are within .02 of these
+numbers. Parts with neither `?` nor a decision word never reach the
+model, and the table does not count their questions.
+
+## Development
+
+To build, you need Node 24 or later with its headers, Swift 6, cmake
+and curl.
+
+    make          # builds the native module and links it into node_modules
+    make smoke    # the native module against the golden file
+    make e2e      # pi in fullscreen on a private tmux server
+    make npm      # npm tarballs for this platform into build/npm-dist
+
+To use the checkout in pi, add `"<checkout>/extension.ts"` to
+`extensions` in `~/.pi/agent/settings.json`. If `data/` has no models,
+`make` takes them from the published npm package. On Linux,
+`linux/Containerfile` gives a build environment.
 
 ## Train your own model
 
-The training pipeline is in [pipeline/](pipeline/). The training data is
-not published: it comes from your own pi and Claude Code transcripts.
-The labels come from DeepSeek (an API key and a few dollars).
+The pipeline is in [pipeline/](pipeline/). The training data is not
+published: it comes from your own pi and Claude Code transcripts, and
+DeepSeek labels it (an API key and a few dollars).
 
     cd pipeline
     uv sync
@@ -115,37 +106,20 @@ The labels come from DeepSeek (an API key and a few dollars).
     uv run synth --calls 100 --batch base     # optional synthetic messages
     uv run train --synth base         # seeds 0-2, selects one on dev
     uv run train --eval               # once, on the held-out split
-    uv run convert-ane                # macOS: the Neural Engine pack
-    uv run parity-ane
-    uv run golden-ane
-    uv run convert-onnx               # Linux: the ONNX pack
-    uv run parity-onnx
-    uv run golden-onnx
+    uv run convert-ane && uv run parity-ane && uv run golden-ane     # macOS
+    uv run convert-onnx && uv run parity-onnx && uv run golden-onnx  # Linux
+    uv run pytest
 
-`uv run extract FILE` prints the questions of a text with the PyTorch
-model. `uv run label FILE` prints DeepSeek's labels for a text.
+`uv run extract FILE` prints the questions in a file with the PyTorch
+model. `uv run label FILE` prints DeepSeek's labels.
 
-### Privacy
-
-- `corpus` reads every assistant message under `~/.pi/agent/sessions`
-  and `~/.claude/projects` and keeps a copy in `data/messages.jsonl`.
-  It replaces your user name, home paths, email
-  addresses and secrets that it recognizes before anything goes to
-  DeepSeek. It does not know the names of your private projects.
-- Everything that the pipeline writes is in `data/`, which is not in
-  git.
-- The published models are trained on the author's transcripts after
-  this redaction. The golden test files contain only the fixtures and
-  synthetic messages.
-
-## Tests
-
-    make smoke    # the native module against the golden file, exactly
-    make e2e      # pi in fullscreen on a private tmux server, fake provider
-    cd pipeline && uv run pytest
-
-`make e2e` needs `pi` and `tmux` on PATH. On Linux,
-`linux/Containerfile` gives a build environment.
+`corpus` copies every assistant message under `~/.pi/agent/sessions`
+and `~/.claude/projects` into `data/messages.jsonl`, which is not in
+git. Before anything goes to DeepSeek, it replaces your user name, home
+paths, email addresses and the secrets that it recognizes. It does not
+know the names of your private projects. The published models are
+trained on the author's transcripts after this redaction. The golden
+files contain only fixtures and synthetic messages.
 
 ## License
 

@@ -210,7 +210,7 @@ normalization removes the backticks from the model input.
 `convert-onnx` (`onnx_pack.py`) exports both taggers to ONNX with
 dynamic batch and sequence length (no packing; units are batched by
 length) and int8 weights, into `data/onnx`. One int8 pack serves x64
-and arm64; each architecture has its own release archive and golden
+and arm64; each architecture has its own npm package and golden
 file. `parity-onnx` has the same two gates.
 
 int8 results depend on the CPU's kernels. x64 is validated on AVX-512
@@ -232,6 +232,23 @@ from its own directory.
 The official Linux build sends telemetry by default. The engine calls
 `DisableTelemetryEvents` after it creates the environment and sets the
 log level to error, so that no warning reaches the TUI.
+
+## Packages
+
+The extension ships on npm as `@andreypopp/pi-infer-questions` and one
+package per platform: `-darwin-arm64`, `-linux-arm64` and `-linux-x64`.
+A platform package has `questions.node`, the models, the golden file
+and, on Linux, `libonnxruntime.so.1` (one regular file, because npm
+drops symlinks). The main package lists the platform packages as
+`optionalDependencies` with the same version, and each platform package
+has `os`, `cpu` and, on Linux, `libc: glibc`, so npm installs only
+the package of the current platform. There is no install script.
+`extension.ts` finds the platform package with `require.resolve`, and
+`make` links the package that it builds into the checkout's
+`node_modules`, so the checkout loads the same way.
+
+The version is in the root `package.json` only. Publish the platform
+packages before the main package.
 
 ## The native module
 

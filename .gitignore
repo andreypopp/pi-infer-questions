@@ -11,3 +11,4 @@ __pycache__/
 *.node
 /libonnxruntime.so*
 /models-linux/
+node_modules/
