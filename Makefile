@@ -45,7 +45,7 @@ LINK = node_modules/$(PKG_NAME)
 DIST = $(BUILD)/npm-dist
 MAIN_TGZ = $(DIST)/andreypopp-pi-infer-questions-$(VERSION).tgz
 
-.PHONY: all package smoke clean e2e npm publish
+.PHONY: all package smoke clean e2e npm npm-linux publish
 
 all: package
 
@@ -109,6 +109,14 @@ npm: package
 	mkdir -p $(DIST)
 	npm pack $(PKG) --pack-destination $(DIST)
 	npm pack . --pack-destination $(DIST)
+
+# On macOS: the Linux tarballs, built in podman containers (x64 runs emulated).
+npm-linux:
+	for arch in arm64 amd64; do \
+	  podman build --platform linux/$$arch --build-arg TARGETARCH=$$arch -t pi-infer-questions-linux:$$arch linux || exit 1; \
+	  podman run --rm --platform linux/$$arch -v $(CURDIR):/work pi-infer-questions-linux:$$arch \
+	    make npm BUILD=build/linux-$$arch LINK=build/linux-$$arch/link DIST=$(DIST) || exit 1; \
+	done
 
 publish:
 	@test -n "$$(ls $(DIST)/*.tgz 2>/dev/null)" || { echo "no tarballs in $(DIST): run make npm on every platform"; exit 1; }
