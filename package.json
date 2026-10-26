@@ -1,6 +1,6 @@
 {
   "name": "@andreypopp/pi-infer-questions",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi extension that finds the questions in the agent's replies and lets you answer them",
   "keywords": ["pi-package"],
   "license": "Apache-2.0",

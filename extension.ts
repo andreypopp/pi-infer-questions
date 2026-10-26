@@ -79,8 +79,9 @@ const parentOf = (node: Component, child: Component): Container | undefined => {
   return undefined;
 };
 
-// pi still draws a spacer line for the assistant message whose text the transformer hides, and the custom
-// entry adds its own spacer, so the reply would move down one row when its entry replaces it.
+// pi still draws a spacer line for the assistant message whose text the transformer hides (after its
+// thinking block, if any), and the custom entry adds its own spacer, so the reply would move down one row
+// when its entry replaces it. The removed lines can carry pi's OSC 133 zone markers, so they are kept.
 const collapseHidden = (root: Component): boolean => {
   const entry = tui && parentOf(tui, root);
   const chat = entry && tui && parentOf(tui, entry);
@@ -91,7 +92,11 @@ const collapseHidden = (root: Component): boolean => {
   const render = hidden.render.bind(hidden);
   hidden.render = (width) => {
     const lines = render(width);
-    return lines.every((line) => visibleWidth(line) === 0) ? [] : lines;
+    let tail = "";
+    while (lines.length && visibleWidth(lines[lines.length - 1]!) === 0) tail = lines.pop() + tail;
+    if (!lines.length) return [];
+    lines[lines.length - 1] += tail;
+    return lines;
   };
   return true;
 };
