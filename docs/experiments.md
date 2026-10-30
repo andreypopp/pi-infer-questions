@@ -27,6 +27,17 @@ different sections are not comparable.
 - **Typed tags against a kind heuristic.** A rule that guessed the kind
   from the first word failed on list items ("2. **Label:** What ...").
   With the kind in the tags, kind accuracy rose from .87 to .97.
+- **One encoder with a question head and an option head.** Tried before
+  the restart, on older units and labels, with the batches of the two
+  tasks interleaved so that each task saw the same data as alone. The
+  two separate models were a little better, inside the seed spread; they
+  stay.
+- **Option tagger started from the question tagger.** Three option seeds
+  from the shipped question model's encoder (a new option head), against
+  three from the base encoder, on the same labels, each with the shipped
+  question model, dev, mean: option F1 .630 against .648, option F1
+  within gold questions .813 against .894. The encoder that is tuned for
+  questions is a worse start; the base encoder stays.
 - **Ettin 68M.** Three seeds of each size on the same labels (the wider
   gate), dev, mean: question F1 .690 against .660, proposal recall .553
   against .492, option F1 .674 against .578, false positives 2.2%
