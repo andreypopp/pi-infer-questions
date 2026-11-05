@@ -41,6 +41,12 @@ private func paragraphLines(_ node: OpaquePointer, _ lines: [String]) -> Range<I
     return start..<((delimiter ?? start + 1) - 1)
 }
 
+// cmark-gfm registers its extensions behind a plain static flag, and a second registration aborts.
+private let table: OpaquePointer? = {
+    cmark_gfm_core_extensions_ensure_registered()
+    return cmark_find_syntax_extension("table")
+}()
+
 private let setextUnderline = try! NSRegularExpression(pattern: #"^ {0,3}(?:=+|-+)\s*$"#)
 private let notKept: Set<String> = ["block_quote", "code_block", "html_block", "table", "thematic_break"]
 
@@ -57,9 +63,8 @@ private func introducesList(_ node: OpaquePointer) -> Bool {
 /// quotes and are not pseudo-headings (a list item can hold them), and the ranges of the headings
 /// and pseudo-headings that stay because the next kept block is a list.
 func proseParagraphs(_ lines: [String]) -> (kept: [Range<Int>], headings: [Range<Int>]) {
-    cmark_gfm_core_extensions_ensure_registered()
     let parser = cmark_parser_new(0)!
-    if let table = cmark_find_syntax_extension("table") { _ = cmark_parser_attach_syntax_extension(parser, table) }
+    if let table { _ = cmark_parser_attach_syntax_extension(parser, table) }
     lines.joined(separator: "\n").withCString { cmark_parser_feed(parser, $0, strlen($0)) }
     let root = cmark_parser_finish(parser)!
     defer {
