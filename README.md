@@ -61,6 +61,16 @@ the pi process:
 
 A reply takes a few milliseconds. See [docs/design.md](docs/design.md).
 
+In TUI and RPC mode, the extension appends a `reply-annotations`
+custom entry for each text block that has questions, without a Markdown
+copy. It follows [Kido's reply annotations contract](https://github.com/andreypopp/kido/blob/main/docs/reply-annotations.md).
+`reply` names the text block that the annotations describe: `at` is the
+assistant message's `timestamp` in milliseconds, `block` is the index
+among all content blocks, and `length` is its untrimmed length in
+Unicode code points. A range is `[start, end)` in Unicode code-point
+offsets into the text block's Markdown source, as pi stores it, untrimmed.
+The TUI reads the same entry and finds the text in the current branch.
+
 ## Quality
 
 Held-out evaluation on 3,060 parts of real coding-agent replies, with
@@ -86,7 +96,7 @@ and curl.
 
     make          # builds the native module and links it into node_modules
     make smoke    # the native module against the golden file
-    make e2e      # pi in fullscreen on a private tmux server
+    make e2e      # pi in RPC mode and fullscreen on a private tmux server
     make npm      # npm tarballs for this platform into build/npm-dist
     make demo     # records docs/demo.gif (needs asciinema and agg)
 

@@ -275,9 +275,39 @@ uses two hooks that it has:
   assistant message only if the extension holds an entry for exactly
   that text. Streaming, aborted and failed replies render as usual.
 - On `message_end` with stop reason `stop`, the extension analyzes the
-  text. If it has questions, it appends an entry (`appendEntry`) with
-  the Markdown and the analysis. Entries do not enter the model's
-  context, and a resumed session renders them without the model.
+  untrimmed text, in TUI and RPC mode. If it has questions, it appends
+  a `reply-annotations` custom entry (`appendEntry`), without a Markdown
+  copy, under [Kido's reply annotations contract](https://github.com/andreypopp/kido/blob/main/docs/reply-annotations.md):
+
+      data: {
+        reply: { at: number; block: number; length: number };
+        annotations: Annotation[];
+      }
+      Annotation =
+        { type: "question"; range: [number, number];
+          kind: "choice" | "yes_no" | "open"; options: [number, number][] }
+
+  `at` is the assistant message's `timestamp` in milliseconds. `block`
+  is the index of the text block in the message's `content`, among all
+  content blocks (text, thinking and tool calls). `length` is the length
+  of the text block in Unicode code points, as pi stores it, untrimmed.
+  A range is `[start, end)` in Unicode code-point offsets into the text
+  block's Markdown source, as pi stores it, untrimmed. An option is
+  inside its question's range. One entry describes one text block.
+  Entries do not enter the model's context. In RPC mode pi emits the
+  entry as an `entry_appended` event.
+- The extension finds the entry's text in the current branch, at
+  session start and when a reply ends. If the reply is absent or its
+  length differs, it renders nothing and does not hide the original.
+  A resumed session renders the entries without the model. Old
+  `pi-infer-questions` entries with a Markdown copy are ignored; their
+  replies show as plain Markdown without controls.
+- Tree changes and compaction rebuild the reply and annotation caches.
+  A result from an earlier session or branch is dropped. Each reply key
+  is analyzed once, including while analysis is pending. The TUI uses
+  only the newest entry for each key. It drops unknown kinds and invalid
+  ranges, drops options outside their question, and ignores options for
+  a kind other than `choice`, before it hides the original text.
 - `registerEntryRenderer` draws the entry through pi-tui's `Markdown`
   component, so it looks like a normal message. Sentinel characters mark
   the clickable ranges; the rendered lines give their cells, and a

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getMarkdownTheme, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
   Container,
@@ -12,8 +12,8 @@ import {
   type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 
-const TYPE = "pi-infer-questions";
-const GUIDE_TYPE = `${TYPE}-guide`;
+const TYPE = "reply-annotations";
+const GUIDE_TYPE = "pi-infer-questions-guide";
 const GUIDE = [
   'When you need a decision or input from the user, ask it as a question that ends with "?", at the end of your reply.',
   "Put one question in one sentence or one list item.",
@@ -35,8 +35,8 @@ interface Analysis {
   options: [number, number][];
 }
 interface Data {
-  markdown: string;
-  questions: Analysis[];
+  reply: { at: number; block: number; length: number };
+  annotations: (Analysis & { type: "question" })[];
 }
 
 type Native = { start(models: string): void; questions(markdown: string): Promise<string> };
@@ -214,6 +214,17 @@ class Interactive implements Component {
   }
 }
 
+function validQuestions(data: Data, markdown: string): Analysis[] {
+  const cps = Array.from(markdown);
+  const range = (value: unknown, from = 0, to = cps.length): value is [number, number] =>
+    Array.isArray(value) && value.length === 2 && value.every(Number.isInteger) && value[0] >= from && value[0] < value[1] && value[1] <= to;
+  if (!Array.isArray(data.annotations)) return [];
+  return data.annotations.flatMap((annotation) => {
+    if (!annotation || annotation.type !== "question" || !["choice", "yes_no", "open"].includes(annotation.kind) || !range(annotation.range) || !Array.isArray(annotation.options)) return [];
+    return [{ ...annotation, options: annotation.kind === "choice" ? annotation.options.filter((option) => range(option, ...annotation.range)) : [] }];
+  });
+}
+
 export default function (pi: ExtensionAPI) {
   if ("error" in loaded) {
     pi.on("session_start", (_event, ctx) => ctx.ui.notify(`${TYPE}: ${loaded.error}`, "error"));
@@ -221,6 +232,17 @@ export default function (pi: ExtensionAPI) {
   }
   const { native } = loaded;
   const texts = new Set<string>();
+  const replies = new Map<number, (string | undefined)[]>();
+  let generation = 0;
+  let context: ExtensionContext;
+  const analysed = new Set<string>();
+  const newest = new Map<string, string>();
+  const key = (reply: Data["reply"]) => `${reply.at}:${reply.block}`;
+  const markdownFor = ({ reply }: Data) => {
+    if (!reply || !Number.isFinite(reply.at) || !Number.isInteger(reply.block) || reply.block < 0 || !Number.isInteger(reply.length)) return undefined;
+    const markdown = replies.get(reply.at)?.[reply.block];
+    return markdown !== undefined && Array.from(markdown).length === reply.length ? markdown : undefined;
+  };
 
   pi.registerFlag("no-question-guide", {
     description: "Do not add the question-asking guideline to the system prompt",
@@ -240,12 +262,43 @@ export default function (pi: ExtensionAPI) {
     context.messageType === "assistant" && !context.isStreaming && texts.has(markdown.trim()) ? "" : markdown,
   );
 
-  pi.on("session_start", (_event, ctx) => {
+  const refresh = (ctx: ExtensionContext) => {
+    context = ctx;
     texts.clear();
-    pending.clear();
-    for (const entry of ctx.sessionManager.getEntries()) {
-      if (entry.type === "custom" && entry.customType === TYPE) texts.add((entry.data as Data).markdown);
+    replies.clear();
+    const branch = ctx.sessionManager.getBranch();
+    for (const entry of branch) {
+      if (entry.type === "message" && entry.message.role === "assistant") {
+        replies.set(entry.message.timestamp, entry.message.content.map((block) => block.type === "text" ? block.text : undefined));
+      }
     }
+    newest.clear();
+    for (const entry of branch) {
+      if (entry.type !== "custom" || entry.customType !== TYPE || !entry.data) continue;
+      const data = entry.data as Data;
+      if (markdownFor(data) === undefined) continue;
+      newest.set(key(data.reply), entry.id);
+      analysed.add(key(data.reply));
+    }
+    for (const entry of branch) {
+      if (entry.type !== "custom" || entry.customType !== TYPE || !entry.data) continue;
+      const data = entry.data as Data;
+      if (!data.reply || newest.get(key(data.reply)) !== entry.id) continue;
+      const markdown = markdownFor(data);
+      if (markdown !== undefined && validQuestions(data, markdown).length) texts.add(markdown.trim());
+    }
+  };
+  const reset = (ctx: ExtensionContext) => {
+    generation++;
+    pending.clear();
+    analysed.clear();
+    refresh(ctx);
+  };
+  pi.on("session_tree", (_event, ctx) => reset(ctx));
+  pi.on("session_compact", (_event, ctx) => reset(ctx));
+  pi.on("session_shutdown", () => { generation++; });
+  pi.on("session_start", (_event, ctx) => {
+    reset(ctx);
     if (ctx.mode !== "tui") return;
     editor = ctx.ui;
     ctx.ui.setWidget(TYPE, (current) => {
@@ -279,19 +332,32 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  pi.on("message_end", (event) => {
-    const message = event.message as { role: string; stopReason?: string; content: { type: string; text?: string }[] };
+  pi.on("message_end", (event, ctx) => {
+    const started = generation;
+    const message = event.message as { role: string; timestamp: number; stopReason?: string; content: { type: string; text?: string }[] };
     if (message.role !== "assistant" || message.stopReason !== "stop") return;
-    for (const block of message.content) {
-      const markdown = block.type === "text" ? block.text?.trim() : undefined;
+    replies.set(message.timestamp, message.content.map((block) => block.type === "text" ? block.text : undefined));
+    for (const [index, block] of message.content.entries()) {
+      const markdown = block.type === "text" ? block.text : undefined;
       if (!markdown) continue;
+      const reply = { at: message.timestamp, block: index, length: Array.from(markdown).length };
+      const id = key(reply);
+      if (analysed.has(id)) continue;
+      analysed.add(id);
       native
         .questions(markdown)
         .then((json) => {
+          if (started !== generation) return;
           const questions = JSON.parse(json) as Analysis[];
           if (questions.length === 0) return;
-          texts.add(markdown);
-          pi.appendEntry<Data>(TYPE, { markdown, questions });
+          const data: Data = {
+            reply,
+            annotations: questions.map((question) => ({ type: "question", ...question })),
+          };
+          if (markdownFor(data) === undefined) return;
+          if (validQuestions(data, markdown).length) texts.add(markdown.trim());
+          pi.appendEntry<Data>(TYPE, data);
+          refresh(ctx);
           tui?.invalidate();
           tui?.requestRender();
         })
@@ -303,7 +369,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerEntryRenderer<Data>(TYPE, (entry, _options, theme) => {
     if (!entry.data) return undefined;
-    const { markdown, questions } = entry.data;
+    const markdown = markdownFor(entry.data);
+    if (markdown === undefined) return undefined;
+    const isNewest = () => context.sessionManager.getBranch().findLast((item) => item.type === "custom" && item.customType === TYPE && (item.data as Data)?.reply && key((item.data as Data).reply) === key(entry.data!.reply))?.id === entry.id;
+    if (!isNewest()) return undefined;
+    const questions = validQuestions(entry.data, markdown);
+    if (!questions.length) return undefined;
     const cps = Array.from(markdown);
     const markdownTheme = getMarkdownTheme();
     const root = new Container();
@@ -360,6 +431,8 @@ export default function (pi: ExtensionAPI) {
         }),
       );
     });
+    const render = root.render.bind(root);
+    root.render = (width) => isNewest() && markdownFor(entry.data!) !== undefined ? render(width) : [];
     return root;
   });
 }

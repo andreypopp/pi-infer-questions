@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const [extension] = process.argv.slice(2);
@@ -62,6 +62,76 @@ const send = (text) => {
 const stop = () => tmux("kill-session", "-t", pane);
 
 try {
+  const rpcFake = join(scratch, "fake.ts");
+  writeFileSync(rpcFake, readFileSync(join(here, "fake.ts"), "utf8")
+    .replace('"I looked at the options.', '" \\r\\n🧭 Café. I looked at the options.')
+    .replace('Trailing note.";', 'Trailing note.\\r\\n  ";')
+    .replace('content: [{ type: "text", text }]', 'content: [{ type: "thinking", thinking: "Check." }, { type: "text", text }, { type: "text", text: "What should the new service be called?" }]'));
+  const rpcExtension = join(scratch, "extension.ts");
+  writeFileSync(rpcExtension, `import extension from ${JSON.stringify(resolve(extension))};
+export default function (pi) {
+  let tree;
+  extension(new Proxy(pi, { get(target, name) {
+    if (name !== "on") return target[name];
+    return (event, handler) => {
+      if (event === "session_tree") tree = handler;
+      target.on(event, event === "message_end" ? (event, ctx) => {
+        handler(event, ctx);
+        handler(event, ctx);
+        if (event.message.role === "assistant" && event.message.content.some((block) => block.text?.includes("Got: stale"))) {
+          tree({}, { ...ctx, sessionManager: new Proxy(ctx.sessionManager, { get(manager, name) {
+            return name === "getBranch" ? () => [] : typeof manager[name] === "function" ? manager[name].bind(manager) : manager[name];
+          } }) });
+        } else setTimeout(() => handler(event, ctx), 250);
+      } : handler);
+    };
+  } }));
+}`);
+  const rpc = spawn("pi", ["--mode", "rpc", "--no-extensions", "-e", rpcExtension, "-e", rpcFake, "--provider", "fake", "--model", "m", "--session-dir", join(scratch, "rpc-sessions"), "--no-skills", "--no-context-files"], {
+    cwd: join(scratch, "work"), env: { ...process.env, PI_CODING_AGENT_DIR: join(scratch, "agent"), PQ_LOG: log, PI_OFFLINE: "1" },
+  });
+  try {
+    const events = [];
+    let buffer = "";
+    rpc.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (const line of lines) if (line.trim()) events.push(JSON.parse(line));
+    });
+    rpc.stdin.write(`${JSON.stringify({ type: "prompt", message: "ask" })}\n`);
+    const deadline = Date.now() + 20_000;
+    while (!events.some((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations" && e.entry.data.reply.block === 1) && Date.now() < deadline) await sleep(50);
+    const entry = events.find((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations" && e.entry.data.reply.block === 1)?.entry;
+    check("RPC appends reply-annotations", !!entry);
+    const sessionFile = readdirSync(join(scratch, "rpc-sessions"), { recursive: true }).find((file) => file.endsWith(".jsonl"));
+    const persisted = readFileSync(join(scratch, "rpc-sessions", sessionFile), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    check("session stores the same reply-annotations entry", persisted.some((item) => item.customType === "reply-annotations" && JSON.stringify(item.data) === JSON.stringify(entry.data)));
+    const message = events.find((e) => e.type === "message_end" && e.message.role === "assistant").message;
+    const { reply, annotations } = entry.data;
+    const cps = Array.from(message.content[reply.block].text);
+    check("RPC reply key uses the untrimmed block", reply.at === message.timestamp && reply.block === 1 && reply.length === cps.length && cps[0] === " " && cps.at(-1) === " ");
+    check("RPC ranges use a source with CRLF and a combining mark", message.content[1].text.includes("\r\n") && message.content[1].text.includes("é"));
+    const blocksDeadline = Date.now() + 20_000;
+    while (events.filter((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations").length < 2 && Date.now() < blocksDeadline) await sleep(50);
+    const entries = events.filter((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations");
+    check("RPC annotates each text block at its content index", entries.some((e) => e.entry.data.reply.block === 1) && entries.some((e) => e.entry.data.reply.block === 2 && e.entry.data.annotations.some((a) => a.kind === "open")));
+    check("RPC entry has no Markdown copy", !Object.hasOwn(entry.data, "markdown"));
+    const choice = annotations.find((a) => a.kind === "choice");
+    const cut = ([a, b]) => cps.slice(a, b).join("");
+    check("RPC code-point ranges select the question and options", choice?.type === "question" && cut(choice.range) === "Which database should we use: **PostgreSQL**, SQLite or MySQL?" && JSON.stringify(choice.options.map(cut)) === JSON.stringify(["PostgreSQL", "SQLite", "MySQL"]));
+    await sleep(500);
+    check("duplicate events produce one entry per reply key", events.filter((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations").length === 2);
+    rpc.stdin.write(`${JSON.stringify({ type: "prompt", message: "stale" })}\n`);
+    const staleDeadline = Date.now() + 20_000;
+    while (!events.some((e) => e.type === "message_end" && e.message.role === "assistant" && e.message.content.some((block) => block.text?.includes("Got: stale"))) && Date.now() < staleDeadline) await sleep(50);
+    check("stale-branch reply completed", events.some((e) => e.type === "message_end" && e.message.role === "assistant" && e.message.content.some((block) => block.text?.includes("Got: stale"))));
+    await sleep(500);
+    check("a branch change drops in-flight analysis", events.filter((e) => e.type === "entry_appended" && e.entry.customType === "reply-annotations").length === 2);
+  } finally {
+    rpc.kill();
+  }
+  writeFileSync(log, "");
   await start();
   send("ask");
   await until("inline answers", () => find("migration? Yes/No/Other"));
