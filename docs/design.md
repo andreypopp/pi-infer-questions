@@ -307,7 +307,9 @@ uses two hooks that it has:
   is analyzed once, including while analysis is pending. The TUI uses
   only the newest entry for each key. It drops unknown kinds and invalid
   ranges, drops options outside their question, and ignores options for
-  a kind other than `choice`, before it hides the original text.
+  a kind other than `choice`, before it hides the original text. It drops
+  overlapping questions and overlapping options within each question:
+  first in text order wins. It keeps the other spans of the entry.
 - `registerEntryRenderer` draws the entry through pi-tui's `Markdown`
   component, so it looks like a normal message. Sentinel characters mark
   the clickable ranges; the rendered lines give their cells, and a

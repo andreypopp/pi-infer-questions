@@ -28,11 +28,12 @@ async function until(what, check, ms = 20_000) {
   throw new Error(`timeout: ${what}\n${screen()}`);
 }
 
+let activeExtension = resolve(extension);
 const pi = (...extra) =>
   [
     `cd ${scratch}/work`,
     `export PI_CODING_AGENT_DIR=${scratch}/agent PQ_LOG=${log} PI_OFFLINE=1`,
-    `exec pi --no-extensions -e ${resolve(extension)} -e ${here}/fake.ts --provider fake --model m --session-dir ${scratch}/sessions --tui-mode fullscreen --no-skills --no-context-files ${extra.join(" ")}`,
+    `exec pi --no-extensions -e ${activeExtension} -e ${here}/fake.ts --provider fake --model m --session-dir ${scratch}/sessions --tui-mode fullscreen --no-skills --no-context-files ${extra.join(" ")}`,
   ].join(" && ");
 
 const mouse = (code, x, y, up = false) => {
@@ -228,6 +229,34 @@ export default function (pi) {
   check("a resumed session shows the answers", resumed.includes("migration? Yes/No/Other"));
   const body = (text) => text.slice(text.lastIndexOf(" ask"), text.lastIndexOf("Trailing note."));
   check("the resumed screen has the same text", body(final) === body(resumed));
+  stop();
+  activeExtension = join(scratch, "overlap.ts");
+  writeFileSync(activeExtension, `import extension from ${JSON.stringify(resolve(extension))};
+export default function (pi) {
+  extension(new Proxy(pi, { get(target, name) {
+    if (name !== "appendEntry") return target[name];
+    return (type, data) => {
+      if (type === "reply-annotations") {
+        const choice = data.annotations.find((a) => a.kind === "choice");
+        if (choice) {
+          const [start, end] = choice.options[0];
+          data = { ...data, annotations: [
+            { type: "question", kind: "open", range: [start, end], options: [] },
+            ...data.annotations.map((a) => a === choice ? { ...a, options: [[start + 1, end], ...a.options].reverse() } : a),
+          ] };
+        }
+      }
+      return target.appendEntry(type, data);
+    };
+  } }));
+}`);
+  await start();
+  send("ask");
+  await until("disjoint answers", () => find("migration? Yes/No/Other"));
+  const disjoint = screen();
+  click(find("PostgreSQL"));
+  await until("retained option answer", () => editorText().includes("\n\nPostgreSQL"));
+  check("overlaps keep the first question and option in text order and the other spans", !disjoint.includes("Answer") && disjoint.includes("SQLite or MySQL? Other") && disjoint.includes("migration? Yes/No/Other") && editorText() === `${quoteDb}\n\nPostgreSQL`);
 } finally {
   try {
     stop();

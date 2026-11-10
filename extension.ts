@@ -219,10 +219,19 @@ function validQuestions(data: Data, markdown: string): Analysis[] {
   const range = (value: unknown, from = 0, to = cps.length): value is [number, number] =>
     Array.isArray(value) && value.length === 2 && value.every(Number.isInteger) && value[0] >= from && value[0] < value[1] && value[1] <= to;
   if (!Array.isArray(data.annotations)) return [];
-  return data.annotations.flatMap((annotation) => {
+  const disjoint = <T,>(items: T[], span: (item: T) => [number, number]): T[] => {
+    let end = 0;
+    return items.sort((a, b) => span(a)[0] - span(b)[0]).filter((item) => {
+      const [start, stop] = span(item);
+      if (start < end) return false;
+      end = stop;
+      return true;
+    });
+  };
+  return disjoint(data.annotations.flatMap((annotation) => {
     if (!annotation || annotation.type !== "question" || !["choice", "yes_no", "open"].includes(annotation.kind) || !range(annotation.range) || !Array.isArray(annotation.options)) return [];
-    return [{ ...annotation, options: annotation.kind === "choice" ? annotation.options.filter((option) => range(option, ...annotation.range)) : [] }];
-  });
+    return [{ ...annotation, options: annotation.kind === "choice" ? disjoint(annotation.options.filter((option) => range(option, ...annotation.range)), (option) => option) : [] }];
+  }), (annotation) => annotation.range);
 }
 
 export default function (pi: ExtensionAPI) {
