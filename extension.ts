@@ -40,7 +40,8 @@ interface Data {
 }
 
 type Native = { start(models: string): void; questions(markdown: string): Promise<string> };
-const loaded: { native: Native } | { error: string } = (() => {
+let loaded: { native: Native } | { error: string } | undefined;
+function loadNative(): { native: Native } | { error: string } {
   const platform = `${process.platform}-${process.arch}`;
   if (!["darwin-arm64", "linux-arm64", "linux-x64"].includes(platform)) return { error: `${platform} is not supported` };
   const name = `@andreypopp/pi-infer-questions-${platform}`;
@@ -58,7 +59,7 @@ const loaded: { native: Native } | { error: string } = (() => {
   } catch (error) {
     return { error: `the module or the models in ${root} do not load: ${error instanceof Error ? error.message : error}` };
   }
-})();
+}
 
 let hovered: string | undefined;
 let moves = 0;
@@ -235,11 +236,6 @@ function validQuestions(data: Data, markdown: string): Analysis[] {
 }
 
 export default function (pi: ExtensionAPI) {
-  if ("error" in loaded) {
-    pi.on("session_start", (_event, ctx) => ctx.ui.notify(`${TYPE}: ${loaded.error}`, "error"));
-    return;
-  }
-  const { native } = loaded;
   const texts = new Set<string>();
   const replies = new Map<number, (string | undefined)[]>();
   let generation = 0;
@@ -353,7 +349,12 @@ export default function (pi: ExtensionAPI) {
       const id = key(reply);
       if (analysed.has(id)) continue;
       analysed.add(id);
-      native
+      if (!loaded) {
+        loaded = loadNative();
+        if ("error" in loaded) ctx.ui.notify(`${TYPE}: ${loaded.error}`, "error");
+      }
+      if ("error" in loaded) return;
+      loaded.native
         .questions(markdown)
         .then((json) => {
           if (started !== generation) return;
