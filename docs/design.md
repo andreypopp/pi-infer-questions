@@ -251,8 +251,11 @@ The main package's version is `version` in the root `package.json`.
 The platform packages' version is the one that `optionalDependencies`
 pins, so a change to `extension.ts` alone publishes only the main
 package. When the native code or the models change, bump the pins too.
-`make publish` publishes the platform packages first and skips each
-version that npm already has.
+`make publish` packs the main package itself, publishes each pinned
+platform package that npm does not have yet from its tarball in
+`build/npm-dist` (`make npm`, and `make npm-linux` on macOS), and
+stops when one is missing; then it publishes the main package. It
+skips each version that npm already has.
 
 ## The native module
 

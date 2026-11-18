@@ -119,12 +119,18 @@ npm-linux:
 	    make npm BUILD=build/linux-$$arch LINK=build/linux-$$arch/link DIST=$(DIST) || exit 1; \
 	done
 
+# Packs the main package, publishes each platform package that the main package pins and npm
+# does not have yet (its tarball comes from make npm or make npm-linux), then the main package.
 publish:
-	@test -n "$$(ls $(DIST)/*.tgz 2>/dev/null)" || { echo "no tarballs in $(DIST): run make npm on every platform"; exit 1; }
-	for t in $(filter-out $(MAIN_TGZ),$(wildcard $(DIST)/*.tgz)) $(MAIN_TGZ); do \
-	  spec=$$(tar -xzOf $$t package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); p.name + "@" + p.version'); \
-	  if npm view $$spec version >/dev/null 2>&1; then echo "$$spec is already published"; else npm publish $$t --access public || exit 1; fi; \
-	done
+	mkdir -p $(DIST)
+	npm pack . --pack-destination $(DIST)
+	set -e; for spec in $$(node -p "Object.entries(require('./package.json').optionalDependencies).map(([n, v]) => n + '@' + v).join(' ')"); do \
+	  if npm view $$spec version >/dev/null 2>&1; then echo "$$spec is already published"; continue; fi; \
+	  t=$(DIST)/$$(echo $$spec | sed 's|^@||; s|/|-|; s|@|-|').tgz; \
+	  test -f $$t || { echo "$$spec is not published and $$t is missing: run make npm (and make npm-linux on macOS)"; exit 1; }; \
+	  npm publish $$t --access public; \
+	done; \
+	if npm view $(NPM_NAME)@$(VERSION) version >/dev/null 2>&1; then echo "$(NPM_NAME)@$(VERSION) is already published"; else npm publish $(MAIN_TGZ) --access public; fi
 
 # Needs asciinema and agg.
 demo: package
